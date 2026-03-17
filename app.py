@@ -10,6 +10,7 @@ import datetime
 import io
 import json
 import urllib.request
+import urllib.error
 from collections import Counter
 
 import pandas as pd

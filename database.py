@@ -61,7 +61,7 @@ def init_db():
     conn.execute("INSERT INTO users (username, password_hash) VALUES (?, ?) ON CONFLICT (username) DO NOTHING", ("admin", pw_hash))
     conn.commit()
     conn.close()
-    print("[DB] Supabase Inizializzato.")
+    print("[DB] Configurazione Supabase completata con successo.")
 
 def get_config(conn=None) -> dict:
     close = False
