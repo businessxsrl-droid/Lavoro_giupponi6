@@ -263,13 +263,22 @@ async function processFiles() {
         pct.textContent = '30%';
         fill.style.width = '30%';
 
+        const token = localStorage.getItem("access_token");
         const resp = await fetch('/api/upload', {
             method: 'POST',
+            headers: token ? { 'Authorization': `Bearer ${token}` } : {},
             body: formData,
         });
 
         pct.textContent = '90%';
         fill.style.width = '90%';
+
+        // Controlla se la risposta è HTML (errore del server) prima di parsare JSON
+        const contentType = resp.headers.get('content-type') || '';
+        if (!contentType.includes('application/json')) {
+            const text = await resp.text();
+            throw new Error(`Il server ha restituito un errore (HTTP ${resp.status}). Controlla i log di Render.`);
+        }
 
         const data = await resp.json();
 
