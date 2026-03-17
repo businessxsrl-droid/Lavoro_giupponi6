@@ -236,22 +236,37 @@ def ingest_contanti(file_path: str, conn=None) -> int:
 
     ident_map = _build_ident_map(conn)
 
-    # Individua colonne di testo dove cercare l'identificativo PV
-    text_cols = [c for c in df.columns if df[c].dtype == object]
+    # Catturiamo tutte le colonne (escluse data/importo) per la ricerca keywords.
+    # Questo è più robusto rispetto al controllo del dtype 'object'.
+    exclude_cols = {col_data, col_importo, "_data", "_importo"}
+    text_cols = [c for c in df.columns if c not in exclude_cols]
 
     count = 0
     params = []
     for _, row in df.iterrows():
-        # Concatena tutti i valori di testo della riga per la ricerca
-        all_text = " ".join(
-            str(row[c]) for c in text_cols if pd.notna(row[c]) and str(row[c]) != "nan"
-        )
+        # Concatena tutti i valori delle colonne di testo/metadati
+        all_text_parts = []
+        for c in text_cols:
+            val = str(row[c]).strip()
+            if val and val.lower() != "nan":
+                all_text_parts.append(val)
+        
+        all_text = " ".join(all_text_parts)
+        all_text_upper = all_text.upper()
+
         codice_pv = None
         for ident, pv in ident_map.items():
-            if ident and ident in all_text:
+            if ident and ident.upper() in all_text_upper:
                 codice_pv = pv
                 break
-        params.append((row["_data"], codice_pv, row["_importo"], all_text[:500]))
+        
+        # Fallback: ricerca hardcoded se il nome comune è presente nel testo
+        if codice_pv is None:
+            # REPUBBLICA (43809), MALEO (46273)
+            if "MALEO" in all_text_upper: codice_pv = 46273
+            elif "REPUBBLICA" in all_text_upper or "43809" in all_text_upper: codice_pv = 43809
+
+        params.append((row["_data"], codice_pv, row["_importo"], all_text[:1000]))
 
     conn.executemany('''
         INSERT INTO transazioni_contanti (data, codice_pv, importo, note_raw)
