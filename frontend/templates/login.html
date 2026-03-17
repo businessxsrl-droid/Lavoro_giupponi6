@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="it">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - Calor Systems V2</title>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@600;700&display=swap"
+        rel="stylesheet">
+    <link rel="icon" type="image/png" href="/static/favicon.png?v=2">
+    <link rel="stylesheet" href="/static/style.css?v=2">
+    <style>
+        body {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            background: var(--bg-primary);
+        }
+
+        .login-card {
+            background: var(--bg-secondary);
+            padding: 40px;
+            border-radius: var(--radius);
+            box-shadow: var(--shadow-card);
+            width: 100%;
+            max-width: 400px;
+            border: 1px solid var(--bg-tertiary);
+            text-align: center;
+        }
+
+        .login-logo {
+            max-width: 200px;
+            margin-bottom: 16px;
+        }
+
+        .login-form input {
+            width: 100%;
+            padding: 12px;
+            margin-bottom: 16px;
+            border: 1px solid var(--bg-tertiary);
+            border-radius: var(--radius-sm);
+            font-family: 'Inter', sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+        }
+
+        .login-form button {
+            width: 100%;
+            padding: 12px;
+            background: var(--accent-blue);
+            color: white;
+            border: none;
+            border-radius: var(--radius-sm);
+            font-weight: 700;
+            font-family: 'Inter', sans-serif;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .login-form button:hover {
+            box-shadow: 0 4px 12px rgba(1, 28, 255, 0.2);
+            transform: translateY(-2px);
+        }
+
+        .error-msg {
+            color: var(--accent-red);
+            font-size: 13px;
+            margin-bottom: 16px;
+            display: none;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="login-card">
+        <img src="/static/logo.png" alt="Calor Systems Logo" class="login-logo">
+        <p style="color: var(--text-secondary); margin-bottom: 24px; font-size: 14px;">Motore Riconciliazione - Accesso
+            Riservato</p>
+        <div id="error-msg" class="error-msg"></div>
+        <form class="login-form" id="login-form">
+            <input type="text" id="username" placeholder="Nome Utente" required autocomplete="username">
+            <input type="password" id="password" placeholder="Password" required autocomplete="current-password">
+            <button type="submit" id="login-btn">Accedi in Sicurezza</button>
+        </form>
+    </div>
+
+    <script src="/static/_auth.js?v=2"></script>
+    <script>
+        document.getElementById('login-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const errorMsg = document.getElementById('error-msg');
+            const btn = document.getElementById('login-btn');
+
+            errorMsg.style.display = 'none';
+            btn.disabled = true;
+            btn.textContent = 'Verifica in corso...';
+
+            const user = document.getElementById('username').value;
+            const pass = document.getElementById('password').value;
+
+            try {
+                const res = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username: user, password: pass })
+                });
+
+                const data = await res.json();
+
+                if (res.ok) {
+                    // Login corretto, _auth.js ha le funzioni per salvare il token
+                    Auth.setTokens(data.access_token, data.refresh_token);
+                    window.location.href = '/';
+                } else {
+                    errorMsg.textContent = data.msg || 'Errore di autenticazione';
+                    errorMsg.style.display = 'block';
+                }
+            } catch (e) {
+                errorMsg.textContent = 'Errore di rete';
+                errorMsg.style.display = 'block';
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Accedi in Sicurezza';
+            }
+        });
+    </script>
+</body>
+
+</html>

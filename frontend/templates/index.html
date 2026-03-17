@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="it">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Calor Systems — Dashboard Riconciliazione</title>
+    <meta name="description" content="Sistema di riconciliazione automatica incassi per stazioni di servizio">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@600;700&display=swap"
+        rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+    <link rel="icon" type="image/png" href="/static/favicon.png?v=4">
+    <link rel="stylesheet" href="/static/style.css?v=5">
+</head>
+
+<body>
+    <!-- ══════════ SIDEBAR ══════════ -->
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo">
+                <span class="logo-icon">⛽</span>
+                <div>
+                    <h1>Calor Systems</h1>
+                    <span class="logo-sub">Riconciliazione</span>
+                </div>
+            </div>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-item active" data-view="dashboard">
+                <span class="nav-icon">📊</span>
+                <span>Dashboard</span>
+            </li>
+            <li class="nav-item" data-view="upload">
+                <span class="nav-icon">📂</span>
+                <span>Carica File</span>
+            </li>
+            <li class="nav-item" data-view="riconciliazioni">
+                <span class="nav-icon">🔄</span>
+                <span>Riconciliazioni</span>
+            </li>
+            <li class="nav-item" data-view="contanti-riepilogo">
+                <span class="nav-icon">📈</span>
+                <span>Riepilogo Contanti</span>
+            </li>
+            <li class="nav-item" data-view="contanti-matching">
+                <span class="nav-icon">💰</span>
+                <span>Matching Contanti</span>
+            </li>
+            <li class="nav-item" data-view="impianti">
+                <span class="nav-icon">🏢</span>
+                <span>Impianti</span>
+            </li>
+            <li class="nav-item" data-view="sicurezza">
+                <span class="nav-icon">🔐</span>
+                <span>Sicurezza</span>
+            </li>
+            <li class="nav-item" data-view="ai-report">
+                <span class="nav-icon">🤖</span>
+                <span>Report AI</span>
+            </li>
+            <li class="nav-item" data-view="settings">
+                <span class="nav-icon">⚙️</span>
+                <span>Impostazioni</span>
+            </li>
+        </ul>
+        <div class="sidebar-footer">
+            <div class="sidebar-version">v2.0 — Workflow Completo</div>
+        </div>
+    </nav>
+
+    <!-- ══════════ MAIN CONTENT ══════════ -->
+    <main class="main-content">
+        <!-- HEADER BAR -->
+        <header class="top-bar">
+            <button class="menu-toggle" id="menuToggle">☰</button>
+            <h2 class="page-title" id="pageTitle">Dashboard</h2>
+            <div class="header-right">
+                <span class="status-dot" id="statusDot"></span>
+                <span class="status-text" id="statusText">Connesso</span>
+                <button id="btnLogout" class="btn-small" style="margin-left: 16px;">Esci</button>
+            </div>
+        </header>
+
+        <!-- ═══ VIEW: DASHBOARD ═══ -->
+        <section class="view active" id="view-dashboard">
+
+            <!-- ── Analisi Torta Incassi ── -->
+            <div class="chart-panel" id="chartPanel">
+                <div class="chart-panel-header">
+                    <div>
+                        <h3 class="chart-title">📊 Analisi Incassi per Categoria</h3>
+                        <p class="chart-subtitle">Somma dei valori Fortech (teorico) e Reale suddivisi per tipo di
+                            incasso</p>
+                    </div>
+                    <button class="btn-refresh" onclick="loadChartData()">🔄 Aggiorna</button>
+                </div>
+                <div class="chart-grid">
+                    <div class="chart-box">
+                        <h4 class="chart-box-title">Fortech (Teorico)</h4>
+                        <div class="chart-canvas-wrap"><canvas id="chartFortech"></canvas></div>
+                        <div class="chart-legend" id="legendFortech"></div>
+                    </div>
+                    <div class="chart-box">
+                        <h4 class="chart-box-title">Reale (Verificato)</h4>
+                        <div class="chart-canvas-wrap"><canvas id="chartReale"></canvas></div>
+                        <div class="chart-legend" id="legendReale"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="stats-grid" id="statsGrid">
+                <div class="stat-card" id="statImpianti">
+                    <div class="stat-icon">🏢</div>
+                    <div class="stat-value">—</div>
+                    <div class="stat-label">Impianti Attivi</div>
+                </div>
+                <div class="stat-card" id="statGiornate">
+                    <div class="stat-icon">📅</div>
+                    <div class="stat-value">—</div>
+                    <div class="stat-label">Giornate Analizzate</div>
+                </div>
+                <div class="stat-card stat-ok" id="statQuadrate">
+                    <div class="stat-icon">✅</div>
+                    <div class="stat-value">—</div>
+                    <div class="stat-label">Quadrature OK</div>
+                </div>
+                <div class="stat-card stat-warn" id="statAnomalie">
+                    <div class="stat-icon">⚠️</div>
+                    <div class="stat-value">—</div>
+                    <div class="stat-label">Anomalie Aperte</div>
+                </div>
+                <div class="stat-card stat-danger" id="statGravi">
+                    <div class="stat-icon">🔴</div>
+                    <div class="stat-value">—</div>
+                    <div class="stat-label">Anomalie Gravi</div>
+                </div>
+                <div class="stat-card" id="statRecords">
+                    <div class="stat-icon">📄</div>
+                    <div class="stat-value">—</div>
+                    <div class="stat-label">Record Importati</div>
+                </div>
+            </div>
+
+            <!-- Stato Verifiche per Impianto -->
+            <div class="section-header">
+                <h3>Stato Verifiche per Impianto</h3>
+                <button class="btn-refresh" onclick="loadStatoVerifiche()">🔄 Aggiorna</button>
+            </div>
+            <div class="verifiche-grid" id="verificheGrid">
+                <div class="empty-state">Nessun dato disponibile. Carica i file Excel per iniziare.</div>
+            </div>
+        </section>
+
+        <!-- ═══ VIEW: UPLOAD ═══ -->
+        <section class="view" id="view-upload">
+            <div class="upload-container">
+                <div class="upload-zone" id="uploadZone">
+                    <div class="upload-icon">📂</div>
+                    <h3>Trascina qui i file Excel</h3>
+                    <p>Oppure clicca per selezionare i file</p>
+                    <p class="upload-hint">Supportati: Fortech, AS400, Numia, iP Portal, Satispay</p>
+                    <input type="file" id="fileInput" multiple accept=".xlsx,.xls,.csv" hidden>
+                </div>
+
+                <div class="file-list" id="fileList">
+                    <!-- Files will be listed here -->
+                </div>
+
+                <div class="upload-actions" id="uploadActions" style="display:none">
+                    <button class="btn btn-secondary" onclick="clearFiles()">🗑 Svuota</button>
+                    <button class="btn btn-primary" id="btnProcess" onclick="processFiles()">▶ Elabora File</button>
+                </div>
+
+                <!-- Processing Progress -->
+                <div class="progress-section" id="progressSection" style="display:none">
+                    <div class="progress-header">
+                        <span class="progress-phase" id="progressPhase">Preparazione...</span>
+                        <span class="progress-pct" id="progressPct">0%</span>
+                    </div>
+                    <div class="progress-bar-track">
+                        <div class="progress-bar-fill" id="progressFill"></div>
+                    </div>
+                    <div class="progress-log" id="progressLog"></div>
+                </div>
+
+                <!-- Results Summary -->
+                <div class="results-summary" id="resultsSummary" style="display:none">
+                    <div class="results-header">
+                        <span class="results-icon">✅</span>
+                        <h3>Elaborazione Completata</h3>
+                    </div>
+                    <div class="results-stats" id="resultsStats"></div>
+                    <button class="btn btn-primary" onclick="switchView('riconciliazioni')">📊 Vedi Risultati</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- ═══ VIEW: RICONCILIAZIONI ═══ -->
+        <section class="view" id="view-riconciliazioni">
+            <div class="section-header">
+                <h3>Risultati Riconciliazione</h3>
+                <div style="display: flex; gap: 8px; margin-left:16px;">
+                    <button class="btn btn-small" onclick="esportaExcel()"
+                        style="background: var(--status-ok); color: white; border: none;">📊 Excel</button>
+                    <button class="btn btn-small" onclick="esportaPDF()"
+                        style="background: var(--status-danger); color: white; border: none;">📄 PDF</button>
+                </div>
+                <div class="filters">
+                    <input type="date" id="filterDa" class="input-date" placeholder="Da">
+                    <input type="date" id="filterA" class="input-date" placeholder="A">
+                    <select id="filterPv" class="input-date" style="min-width: 160px;">
+                        <option value="">Tutti i punti vendita</option>
+                    </select>
+                    <button class="btn btn-small" onclick="loadRiconciliazioni()">Filtra</button>
+                </div>
+            </div>
+            <div id="riconciliazioniTablesContainer">
+                <div class="table-container">
+                    <table class="data-table" id="riconciliazioniTable">
+                        <thead>
+                            <tr>
+                                <th>Data</th>
+                                <th>Impianto</th>
+                                <th>Categoria</th>
+                                <th>Fortech (€)</th>
+                                <th>Reale (€)</th>
+                                <th>Diff (€)</th>
+                                <th>Stato</th>
+                                <th>Note</th>
+                            </tr>
+                        </thead>
+                        <tbody id="riconciliazioniBody">
+                            <tr>
+                                <td colspan="8" class="empty-state">Nessun dato</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- ═══ VIEW: RIEPILOGO CONTANTI (VISTA GLOBALE) ═══ -->
+        <section class="view" id="view-contanti-riepilogo">
+            <div class="section-header">
+                <h3>📈 Riepilogo Differenze Totali per Impianto</h3>
+                <button class="btn-refresh" onclick="loadContantiRiepilogo()">🔄 Aggiorna</button>
+            </div>
+            <p class="view-description">Situazione aggregata per ogni punto vendita. Le differenze sono calcolate come
+                sommatoria di tutti i dati Fortech meno la sommatoria di tutti i versamenti Excel.</p>
+            
+            <div id="contantiRiepilogoContainer" style="margin-top: 20px;">
+                <div id="contantiRiepilogo"></div>
+            </div>
+        </section>
+
+        <!-- ═══ VIEW: MATCHING CONTANTI (SIMONA - OPERATIVO) ═══ -->
+        <section class="view" id="view-contanti-matching">
+            <div class="section-header">
+                <h3>💰 Matching Contanti — Operativo</h3>
+                <button class="btn-refresh" onclick="loadContantiBanca()">🔄 Aggiorna</button>
+            </div>
+            <p class="view-description">Verifica i risultati del matching automatico tra contante teorico (Fortech) e
+                versamenti bancari (AS400). Espandi ogni riga per vedere i dettagli del calcolo.</p>
+
+            <div class="contanti-stats" id="contantiStats"></div>
+            <div class="contanti-list" id="contantiList">
+                <div class="empty-state">Nessun dato contanti disponibile</div>
+            </div>
+        </section>
+
+        <!-- ═══ VIEW: IMPIANTI ═══ -->
+        <section class="view" id="view-impianti">
+            <div class="section-header">
+                <h3>🏢 Impianti</h3>
+                <button class="btn-refresh" onclick="loadImpianti()">🔄 Aggiorna</button>
+            </div>
+            <div class="impianti-grid" id="impiantiGrid">
+                <div class="empty-state">Nessun dato</div>
+            </div>
+        </section>
+
+        <!-- ═══ VIEW: SICUREZZA ═══ -->
+        <section class="view" id="view-sicurezza">
+            <div class="section-header">
+                <h3>🔐 Alert Sicurezza — Taleggio</h3>
+            </div>
+            <p class="view-description">Monitoraggio aperture cassaforte per impianti self-service (Taleggio).
+                L'apertura è autorizzata solo il giovedì. Il contante prelevato deve corrispondere all'incasso Fortech
+                nel periodo.</p>
+
+            <div
+                style="background:var(--bg-card);border-radius:var(--radius);border:1px solid rgba(210,153,34,0.3);padding:48px 32px;text-align:center;max-width:600px;margin:40px auto">
+                <div style="font-size:48px;margin-bottom:16px">🚧</div>
+                <h3 style="font-size:18px;font-weight:700;margin-bottom:12px">Funzionalità in arrivo</h3>
+                <p style="color:var(--text-secondary);font-size:13px;line-height:1.7;margin-bottom:20px">
+                    Questa sezione sarà attiva nella prossima versione, quando verrà integrato il modulo di
+                    <strong>scraping Taleggio</strong> per la lettura automatica degli eventi cassaforte IoT.
+                </p>
+                <div style="display:flex;flex-direction:column;gap:8px;text-align:left;max-width:380px;margin:0 auto">
+                    <div style="display:flex;align-items:center;gap:10px;font-size:12px;color:var(--text-secondary)">
+                        <span style="color:var(--status-ok)">✅</span> Struttura frontend pronta
+                    </div>
+                    <div style="display:flex;align-items:center;gap:10px;font-size:12px;color:var(--text-secondary)">
+                        <span style="color:var(--status-ok)">✅</span> Endpoint API <code
+                            style="background:var(--bg-tertiary);padding:1px 6px;border-radius:4px;font-size:11px">/api/sicurezza</code>
+                        configurato
+                    </div>
+                    <div style="display:flex;align-items:center;gap:10px;font-size:12px;color:var(--text-secondary)">
+                        <span style="color:var(--status-warn)">⏳</span> In attesa: modulo scraping Taleggio
+                    </div>
+                    <div style="display:flex;align-items:center;gap:10px;font-size:12px;color:var(--text-secondary)">
+                        <span style="color:var(--status-warn)">⏳</span> In attesa: integrazione dati cassaforte IoT
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ═══ VIEW: AI REPORT ═══ -->
+        <section class="view" id="view-ai-report">
+            <div class="section-header">
+                <h3>🤖 Report AI — Analisi Intelligente</h3>
+            </div>
+            <p class="view-description">L'intelligenza artificiale analizza i risultati della riconciliazione e genera
+                un report professionale con anomalie, criticità e suggerimenti. Powered by OpenRouter (GPT-4o Mini).</p>
+
+            <div class="ai-controls">
+                <button class="btn btn-ai" id="btnGenerateAI" onclick="generateAIReport()">
+                    <span class="ai-sparkle">✨</span> Genera Report AI
+                </button>
+                <span class="ai-status" id="aiStatus"></span>
+            </div>
+
+            <div class="ai-report-container" id="aiReportContainer" style="display:none">
+                <div class="ai-report-header">
+                    <span>🤖 Analisi AI</span>
+                    <span class="ai-timestamp" id="aiTimestamp"></span>
+                </div>
+                <div class="ai-report-body" id="aiReportBody"></div>
+            </div>
+        </section>
+        </section>
+
+        <!-- ═══ VIEW: IMPOSTAZIONI ═══ -->
+        <section class="view" id="view-settings">
+            <div class="settings-header-wrapper">
+                <div class="section-header">
+                    <h3>⚙️ Impostazioni Sistema</h3>
+                </div>
+                <p class="view-description">Gestisci la sicurezza del tuo account e personalizza le tolleranze di
+                    calcolo
+                    (scarti in euro) usate dal motore di riconciliazione automatica.</p>
+            </div>
+
+            <div class="settings-grid">
+                <!-- Card Password -->
+                <div class="settings-card">
+                    <div class="settings-card-header">
+                        <h4>🔐 Cambia Password</h4>
+                        <p>Mantieni sicuro il tuo account aggiornando la password con una forte e sicura.</p>
+                    </div>
+                    <div class="settings-card-body">
+                        <form id="formPassword" onsubmit="updatePassword(event)">
+                            <div class="form-group">
+                                <label for="old_pw">Vecchia Password</label>
+                                <div class="input-wrapper">
+                                    <input type="password" id="old_pw" class="settings-input" required
+                                        placeholder="Inserisci vecchia password">
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label for="new_pw">Nuova Password <span class="input-hint">(min. 8 crt)</span></label>
+                                <div class="input-wrapper">
+                                    <input type="password" id="new_pw" class="settings-input" required minlength="8"
+                                        placeholder="Inserisci nuova password">
+                                </div>
+                            </div>
+                            <button type="submit" class="btn-vibrant w-100">Aggiorna Password</button>
+                            <div id="pw-status" class="status-message"></div>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- Card Tolleranze -->
+                <div class="settings-card glass-panel">
+                    <div class="settings-card-header">
+                        <h4>🎛️ Soglie di Riconciliazione</h4>
+                        <p>Imposta lo scarto massimo (in Euro) o i giorni di latenza tollerati per considerare
+                            "Quadrata" una transazione.</p>
+                    </div>
+                    <div class="settings-card-body">
+                        <form id="formConfig" onsubmit="updateConfig(event)">
+
+                            <div class="settings-section-title">Contanti & Carte</div>
+                            <div class="settings-list">
+                                <div class="settings-item">
+                                    <div class="settings-item-info">
+                                        <label for="cfg_contanti">Tolleranza Contanti (Arrotondamento)</label>
+                                    </div>
+                                    <div class="settings-item-control">
+                                        <span class="currency-symbol">€</span>
+                                        <input type="number" step="0.01" id="cfg_contanti"
+                                            class="settings-input text-right" required>
+                                    </div>
+                                </div>
+
+                                <div class="settings-item">
+                                    <div class="settings-item-info">
+                                        <label for="cfg_carte">Tolleranza Carte Bancarie (Fisiologica)</label>
+                                    </div>
+                                    <div class="settings-item-control">
+                                        <span class="currency-symbol">€</span>
+                                        <input type="number" step="0.01" id="cfg_carte"
+                                            class="settings-input text-right" required>
+                                    </div>
+                                </div>
+
+                                <div class="settings-item">
+                                    <div class="settings-item-info">
+                                        <label for="cfg_satispay">Tolleranza Satispay</label>
+                                    </div>
+                                    <div class="settings-item-control">
+                                        <span class="currency-symbol">€</span>
+                                        <input type="number" step="0.01" id="cfg_satispay"
+                                            class="settings-input text-right" required>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="settings-section-title mt-4">Latenza Temporale</div>
+                            <div class="settings-list">
+                                <div class="settings-item">
+                                    <div class="settings-item-info">
+                                        <label for="cfg_giorni">Latenza incasso Buoni iP</label>
+                                    </div>
+                                    <div class="settings-item-control">
+                                        <input type="number" step="1" id="cfg_giorni"
+                                            class="settings-input text-right w-80" required>
+                                        <span class="unit-symbol">gg</span>
+                                    </div>
+                                </div>
+
+                                <div class="settings-item">
+                                    <div class="settings-item-info">
+                                        <label for="cfg_giorni_contanti_inf">Anticipo Versamento Contanti (max)</label>
+                                    </div>
+                                    <div class="settings-item-control">
+                                        <input type="number" step="1" id="cfg_giorni_contanti_inf"
+                                            class="settings-input text-right w-80" required>
+                                        <span class="unit-symbol">gg</span>
+                                    </div>
+                                </div>
+
+                                <div class="settings-item">
+                                    <div class="settings-item-info">
+                                        <label for="cfg_giorni_contanti_sup">Ritardo Versamento Contanti (max)</label>
+                                    </div>
+                                    <div class="settings-item-control">
+                                        <input type="number" step="1" id="cfg_giorni_contanti_sup"
+                                            class="settings-input text-right w-80" required>
+                                        <span class="unit-symbol">gg</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <button type="submit" class="btn-vibrant w-100 mt-4">Salva Tolleranze</button>
+                            <div id="cfg-status" class="status-message"></div>
+                        </form>
+                    </div>
+                </div>
+                <!-- Card API Keys -->
+                <div class="settings-card">
+                    <div class="settings-card-header">
+                        <h4>🤖 Chiave API Report AI</h4>
+                        <p>Inserisci la tua chiave OpenRouter per abilitare l'analisi automatica delle anomalie con AI.
+                        </p>
+                    </div>
+                    <div class="settings-card-body">
+                        <div class="form-group">
+                            <label for="openrouter_key">OpenRouter API Key</label>
+                            <div class="input-wrapper" style="position:relative;">
+                                <input type="password" id="openrouter_key" class="settings-input"
+                                    placeholder="sk-or-v1-…" autocomplete="off">
+                                <button type="button" onclick="toggleApiKeyVisibility()"
+                                    style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:1rem;"
+                                    id="btnToggleKey">👁️</button>
+                            </div>
+                            <small style="color:var(--text-muted);margin-top:6px;display:block;">
+                                Ottieni la chiave su <a href="https://openrouter.ai/keys" target="_blank"
+                                    style="color:var(--accent-blue);">openrouter.ai/keys</a> (gratuita con crediti
+                                iniziali)
+                            </small>
+                        </div>
+                        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px;">
+                            <button type="button" class="btn-vibrant w-100" onclick="salvaApiKey()" style="flex:1;">💾
+                                Salva Chiave</button>
+                            <button type="button" class="btn-small" onclick="testApiKey()" style="flex:1;">🧪
+                                Testa</button>
+                        </div>
+                        <div id="apikey-status" class="status-message" style="margin-top:10px;"></div>
+                    </div>
+                </div>
+
+            </div>
+        </section>
+    </main>
+
+    <!-- ══════════ MODAL: DETTAGLIO IMPIANTO ══════════ -->
+    <div class="modal-overlay" id="modalOverlay" style="display:none" onclick="closeModal(event)">
+        <div class="modal-content" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <div>
+                    <h3 id="modalTitle">Impianto</h3>
+                    <span class="modal-subtitle" id="modalSubtitle"></span>
+                </div>
+                <button class="modal-close" onclick="closeModal()">&times;</button>
+            </div>
+            <div class="modal-body" id="modalBody">
+                <div class="empty-state">Caricamento...</div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/_auth.js?v=9"></script>
+    <script src="/static/app.js?v=9"></script>
+</body>
+
+</html>

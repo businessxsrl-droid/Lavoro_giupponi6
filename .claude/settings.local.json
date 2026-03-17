@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Users/Utente/Desktop/Lavoro/Lavoro_Giupponi5/frontend/**)"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\Utente\\Desktop\\Lavoro\\Lavoro_Giupponi5\\frontend\\templates"
+    ]
+  }
+}

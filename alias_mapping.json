@@ -1,0 +1,109 @@
+{
+  "aliases": [
+    "BEATRICE SELF",
+    "REPUBBLICA SELF",
+    "MONTODINE SELF",
+    "MALEO SELF",
+    "CREMONA SELF",
+    "SEGGIANO SELF",
+    "ROMANO SELF",
+    "GIUSEPPINA SELF",
+    "MANTEGNA SELF",
+    "SELVINO SELF",
+    "BELFIORE SELF",
+    "MARMIROLO SELF",
+    "OLTRE IL COLLE SELF",
+    "SELVINO CORDLESS",
+    "BEATRICE CORDLESS",
+    "REPUBBLICA CORDLESS",
+    "MALEO CORDLESS",
+    "MANTEGNA CORDLESS",
+    "SEGGIANO CORDLESS",
+    "MONTODINE CORDLESS",
+    "GIUSEPPINA CORDLESS",
+    "CREMONA CORDLESS",
+    "ROMANO CORDLESS"
+  ],
+  "impianti": [
+    {
+      "COD. PV": 47831,
+      "COMUNE": "BOZZOLO",
+      "INDIRIZZO": "V.le Rimembranze - Piazza Belfiore"
+    },
+    {
+      "COD. PV": 43958,
+      "COMUNE": "BOZZOLO",
+      "INDIRIZZO": "Via Giuseppina, 7"
+    },
+    {
+      "COD. PV": 48765,
+      "COMUNE": "CREMONA",
+      "INDIRIZZO": "Via del Giordano, 81"
+    },
+    {
+      "COD. PV": 46273,
+      "COMUNE": "MALEO",
+      "INDIRIZZO": "Via Roma, 70"
+    },
+    {
+      "COD. PV": 47832,
+      "COMUNE": "MARMIROLO",
+      "INDIRIZZO": "SS 236 km 5+400"
+    },
+    {
+      "COD. PV": 48979,
+      "COMUNE": "MILANO",
+      "INDIRIZZO": "V.le Beatrice d'Este, 34 A"
+    },
+    {
+      "COD. PV": 43809,
+      "COMUNE": "MILANO",
+      "INDIRIZZO": "P.zza della Repubblica"
+    },
+    {
+      "COD. PV": 43695,
+      "COMUNE": "MONTODINE",
+      "INDIRIZZO": "SP Crema-Codogno"
+    },
+    {
+      "COD. PV": 41118,
+      "COMUNE": "OLTRE IL COLLE",
+      "INDIRIZZO": "Piazzale degli Alpini, 15"
+    },
+    {
+      "COD. PV": 45531,
+      "COMUNE": "PIOLTELLO",
+      "INDIRIZZO": "Via Mantegna, 12"
+    },
+    {
+      "COD. PV": 43699,
+      "COMUNE": "PIOLTELLO",
+      "INDIRIZZO": "Via Monza,22 loc.Seggiano"
+    },
+    {
+      "COD. PV": 43596,
+      "COMUNE": "ROMANO",
+      "INDIRIZZO": "Via Schivardi"
+    },
+    {
+      "COD. PV": 40297,
+      "COMUNE": "SELVINO",
+      "INDIRIZZO": "Via E. Talpino, 20"
+    },
+    {
+      "COD. PV": 41010,
+      "COMUNE": "TALEGGIO",
+      "INDIRIZZO": "Strada Provinciale 25"
+    },
+    {
+      "COD. PV": 45874,
+      "COMUNE": "BERGAMO",
+      "INDIRIZZO": "Via Ghislandi 35"
+    },
+    {
+      "COD. PV": 42840,
+      "COMUNE": "ROVETTA",
+      "INDIRIZZO": "Via A. Fantoni, 53"
+    }
+  ]
+}

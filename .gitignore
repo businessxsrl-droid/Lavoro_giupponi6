@@ -1,0 +1,40 @@
+# Python junk
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.env
+
+# Database
+reconciliator.db
+*.db-journal
+*.db-wal
+
+# Excel files and uploads
+excel/*.xlsx
+excel/*.xls
+excel/*.csv
+!excel/.gitkeep
+tmp_*
+
+# Migration and test scripts
+_gen_sql_supabase.py
+_test_*.py
+_debug_*.py
+_analyze_*.py
+test_rpc.py
+_sql_*.sql
+
+# System / IDE
+.DS_Store
+.vscode/
+.idea/
+.agents/
+.agent/
+.gemini/
+.cortex/
+brain/
+logs/
