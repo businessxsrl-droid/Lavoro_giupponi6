@@ -59,11 +59,32 @@ def _inserisci_risultato(conn, pv: int, data: str, cat: str,
 #  FORTECH — caricamento dati base
 # ═══════════════════════════════════════════════════════════════════════════════
 
+def _to_df(conn, query, columns) -> pd.DataFrame:
+    """Utility per convertire risultati Supabase in DataFrame."""
+    try:
+        rows = conn.execute(query).fetchall()
+        if not rows:
+            return pd.DataFrame(columns=columns)
+        
+        # Estraiamo i valori dalle righe (visto che Supabase ritorna dict/DualAccessRow)
+        data = []
+        for r in rows:
+            if hasattr(r, "_values"):
+                data.append(r._values)
+            elif isinstance(r, dict):
+                data.append(list(r.values()))
+            else:
+                data.append(r)
+                
+        return pd.DataFrame(data, columns=columns)
+    except Exception as e:
+        print(f"[RECONCILER ERROR] Fallito caricamento DataFrame: {e}")
+        return pd.DataFrame(columns=columns)
+
 def _carica_fortech(conn) -> pd.DataFrame:
     """Legge tutte le giornate Fortech dal DB."""
-    return pd.read_sql_query(
-        "SELECT codice_pv, data, totale_contante, totale_pos, totale_buoni, "
-        "totale_satispay, totale_petrolifere FROM transazioni_fortech", conn)
+    cols = ["codice_pv", "data", "totale_contante", "totale_pos", "totale_buoni", "totale_satispay", "totale_petrolifere"]
+    return _to_df(conn, f"SELECT {', '.join(cols)} FROM transazioni_fortech", cols)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -72,10 +93,11 @@ def _carica_fortech(conn) -> pd.DataFrame:
 
 def _reconcile_contanti(conn, df_f: pd.DataFrame, tol: float) -> int:
     """Riconcilia i contanti confrontando i totali per data esatta."""
-    df_reale = pd.read_sql_query(
+    cols = ["codice_pv", "data", "reale"]
+    df_reale = _to_df(conn, 
         "SELECT codice_pv, data, SUM(importo) AS reale "
         "FROM transazioni_contanti WHERE codice_pv IS NOT NULL "
-        "GROUP BY codice_pv, data", conn)
+        "GROUP BY codice_pv, data", cols)
 
     m = df_f[["codice_pv", "data", "totale_contante"]].copy()
     if not df_reale.empty:
@@ -105,11 +127,11 @@ def _reconcile_contanti(conn, df_f: pd.DataFrame, tol: float) -> int:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _reconcile_carte_bancarie(conn, df_f: pd.DataFrame, tol: float) -> int:
-    """Riconcilia le transazioni POS (Numia) vs Fortech, con mapping alias → PV."""
     impianti   = _build_alias_to_pv(conn)
-    df_pos_raw = pd.read_sql_query(
+    cols = ["data", "alias_terminale", "importo"]
+    df_pos_raw = _to_df(conn,
         "SELECT data, alias_terminale, SUM(importo) AS importo "
-        "FROM transazioni_pos GROUP BY data, alias_terminale", conn)
+        "FROM transazioni_pos GROUP BY data, alias_terminale", cols)
 
     if not df_pos_raw.empty:
         df_pos_raw["codice_pv"] = df_pos_raw["alias_terminale"].apply(
@@ -150,10 +172,11 @@ def _reconcile_carte_bancarie(conn, df_f: pd.DataFrame, tol: float) -> int:
 
 def _reconcile_satispay(conn, df_f: pd.DataFrame, tol: float) -> int:
     """Riconcilia le transazioni Satispay vs Fortech."""
-    df_reale = pd.read_sql_query(
+    cols = ["codice_pv", "data", "reale"]
+    df_reale = _to_df(conn,
         "SELECT codice_pv, data, SUM(importo) AS reale "
         "FROM transazioni_satispay WHERE codice_pv IS NOT NULL "
-        "GROUP BY codice_pv, data", conn)
+        "GROUP BY codice_pv, data", cols)
 
     m = df_f[["codice_pv", "data", "totale_satispay"]].copy()
     if not df_reale.empty:
@@ -183,10 +206,11 @@ def _reconcile_satispay(conn, df_f: pd.DataFrame, tol: float) -> int:
 
 def _reconcile_buoni(conn, df_f: pd.DataFrame, tol: float) -> int:
     """Riconcilia i buoni/voucher (iP Portal) vs Fortech."""
-    df_reale = pd.read_sql_query(
+    cols = ["codice_pv", "data", "reale"]
+    df_reale = _to_df(conn,
         "SELECT codice_pv, data, SUM(importo) AS reale "
         "FROM transazioni_buoni WHERE codice_pv IS NOT NULL "
-        "GROUP BY codice_pv, data", conn)
+        "GROUP BY codice_pv, data", cols)
 
     m = df_f[["codice_pv", "data", "totale_buoni"]].copy()
     if not df_reale.empty:
@@ -216,10 +240,11 @@ def _reconcile_buoni(conn, df_f: pd.DataFrame, tol: float) -> int:
 
 def _reconcile_petrolifere(conn, df_f: pd.DataFrame, tol: float) -> int:
     """Riconcilia le carte petrolifere vs Fortech."""
-    df_reale = pd.read_sql_query(
+    cols = ["codice_pv", "data", "reale"]
+    df_reale = _to_df(conn,
         "SELECT codice_pv, data, SUM(importo) AS reale "
         "FROM transazioni_petrolifere WHERE codice_pv IS NOT NULL "
-        "GROUP BY codice_pv, data", conn)
+        "GROUP BY codice_pv, data", cols)
 
     m = df_f[["codice_pv", "data", "totale_petrolifere"]].copy()
     if not df_reale.empty:
@@ -312,16 +337,19 @@ def _reconcile_contanti_matching(conn, cfg: dict):
       - Match cumulativo 2-4gg (somma di giorni Fortech = un versamento AS400)
     """
     tolleranza  = float(cfg.get("tolleranza_contanti_arrotondamento", 2.00))
-    giorni_inf  = int(cfg.get("scarto_giorni_contanti_inf", 3))
-    giorni_sup  = int(cfg.get("scarto_giorni_contanti_sup", 7))
+    giorni_inf  = int(float(cfg.get("scarto_giorni_contanti_inf", 3)))
+    giorni_sup  = int(float(cfg.get("scarto_giorni_contanti_sup", 7)))
 
-    df_fort = pd.read_sql_query(
+    cols_fort = ["codice_pv", "data", "totale_contante"]
+    df_fort = _to_df(conn,
         "SELECT codice_pv, data, totale_contante FROM transazioni_fortech "
-        "WHERE totale_contante > 0 ORDER BY codice_pv, data", conn)
-    df_as400 = pd.read_sql_query(
+        "WHERE totale_contante > 0 ORDER BY codice_pv, data", cols_fort)
+        
+    cols_as4 = ["codice_pv", "data", "importo"]
+    df_as400 = _to_df(conn,
         "SELECT codice_pv, data, SUM(importo) AS importo "
         "FROM transazioni_contanti WHERE codice_pv IS NOT NULL "
-        "GROUP BY codice_pv, data ORDER BY codice_pv, data", conn)
+        "GROUP BY codice_pv, data ORDER BY codice_pv, data", cols_as4)
 
     conn.execute("DELETE FROM contanti_matching WHERE TRUE")
 
