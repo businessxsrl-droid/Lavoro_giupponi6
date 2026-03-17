@@ -40,24 +40,32 @@ class SupabaseWrapper:
         self.client = get_client()
 
     def execute(self, query, params=None):
-        # Converte i ? in input per l'RPC se necessario o pulisce la query
-        # Usiamo l'RPC 'exec_sql' che abbiamo creato su Supabase per compatibilità
-        clean_query = query.replace("?", "%s")
+        """Esegue query via RPC. Gestisce i parametri ? convertendoli in stringhe SQL safe."""
+        clean_query = query
         if params:
-            # Semplice escape/formattazione per i parametri (molto basica per questo uso interno)
-            from psycopg2.extensions import adapt
-            formatted_params = tuple(adapt(p).getquoted().decode('utf-8') for p in params)
-            try:
-                clean_query = clean_query % formatted_params
-            except:
-                pass
+            formatted_params = []
+            for p in params:
+                if p is None:
+                    formatted_params.append("NULL")
+                elif isinstance(p, (int, float)):
+                    formatted_params.append(str(p))
+                elif isinstance(p, bool):
+                    formatted_params.append("TRUE" if p else "FALSE")
+                else:
+                    # Stringa o altro: escape degli apici e racchiudi in '
+                    val = str(p).replace("'", "''")
+                    formatted_params.append(f"'{val}'")
+            
+            # Sostituiamo i ? uno alla volta
+            for p_str in formatted_params:
+                clean_query = clean_query.replace("?", p_str, 1)
 
         try:
-            # Eseguiamo tramite RPC per mantenere il supporto SQL completo
             res = self.client.rpc("exec_sql", {"query_text": clean_query}).execute()
             return SupabaseCursor(res.data)
         except Exception as e:
-            print(f"[DB Error] Query fallita: {query[:100]}... Errore: {e}")
+            msg = str(e)
+            print(f"[DB Error] Query fallita: {query[:100]}... Errore: {msg}")
             return SupabaseCursor([])
 
     def commit(self): pass
