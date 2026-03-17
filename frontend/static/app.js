@@ -793,6 +793,7 @@ const TIPO_MATCH_LABELS = {
     'cumulativo_2gg': { label: 'Cumulativo 2gg', icon: '📦', css: 'tm-cumulativo' },
     'cumulativo_3gg': { label: 'Cumulativo 3gg', icon: '📦', css: 'tm-cumulativo' },
     'cumulativo_4gg': { label: 'Cumulativo 4gg', icon: '📦', css: 'tm-cumulativo' },
+    'settimanale': { label: 'Settimanale', icon: '📅', css: 'tm-cumulativo' },
     'nessuno': { label: 'Nessun Match', icon: '❌', css: 'tm-nessuno' },
     'zero': { label: 'Niente Contanti', icon: '—', css: 'tm-zero' },
     '': { label: 'Legacy', icon: '📋', css: 'tm-legacy' },

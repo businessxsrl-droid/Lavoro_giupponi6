@@ -442,10 +442,32 @@ def _reconcile_contanti_matching(conn, cfg: dict):
                     if tipo_match != "nessuno":
                         break
 
+            # 4. Prova match settimanale (Lunedì - Domenica)
+            if tipo_match == "nessuno":
+                monday = data_dt - timedelta(days=data_dt.weekday())
+                sunday = monday + timedelta(days=6)
+                monday_str = monday.strftime("%Y-%m-%d")
+                sunday_str = sunday.strftime("%Y-%m-%d")
+                
+                week_rows = fort_pv[
+                    (fort_pv["data"] >= monday_str) &
+                    (fort_pv["data"] <= sunday_str)
+                ]
+                if len(week_rows) >= 2:
+                    sum_teorico = float(week_rows["totale_contante"].sum())
+                    
+                    for (d, imp) in as400_in_range:
+                        diff = abs(sum_teorico - imp)
+                        if diff <= tolleranza * len(week_rows):
+                            versato    = imp
+                            tipo_match = "settimanale"
+                            used_as400.add((pv, d))
+                            break
+
             diff_finale = round(teorico - versato, 2)
             if tipo_match == "1:1_esatto":
                 stato = ST_QUADRATO
-            elif tipo_match == "1:1_arrotondato" or tipo_match.startswith("cumulativo"):
+            elif tipo_match == "1:1_arrotondato" or tipo_match.startswith("cumulativo") or tipo_match == "settimanale":
                 stato = ST_QUADRATO_ARROT if abs(diff_finale) <= tolleranza * 3 else ST_ANOMALIA_LIEVE
             elif versato == 0 and teorico == 0:
                 stato = None  # skip
