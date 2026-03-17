@@ -175,21 +175,22 @@ def ingest_fortech(file_path: str, conn=None) -> int:
         return 0
 
     count = 0
-    for r in records:
-        conn.execute('''
-            INSERT INTO transazioni_fortech
-                (codice_pv, data, totale_contante, totale_pos, totale_buoni,
-                 totale_satispay, totale_petrolifere)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(codice_pv, data) DO UPDATE SET
-                totale_contante    = totale_contante    + excluded.totale_contante,
-                totale_pos         = totale_pos         + excluded.totale_pos,
-                totale_buoni       = totale_buoni       + excluded.totale_buoni,
-                totale_satispay    = totale_satispay    + excluded.totale_satispay,
-                totale_petrolifere = totale_petrolifere + excluded.totale_petrolifere
-        ''', (r["codice_pv"], r["data"], r["contanti"], r["pos"],
-              r["buoni"], r["satispay"], r["petrolifere"]))
-        count += 1
+    params = [(r["codice_pv"], r["data"], r["contanti"], r["pos"],
+               r["buoni"], r["satispay"], r["petrolifere"]) for r in records]
+    
+    conn.executemany('''
+        INSERT INTO transazioni_fortech
+            (codice_pv, data, totale_contante, totale_pos, totale_buoni,
+             totale_satispay, totale_petrolifere)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(codice_pv, data) DO UPDATE SET
+            totale_contante    = transazioni_fortech.totale_contante    + EXCLUDED.totale_contante,
+            totale_pos         = transazioni_fortech.totale_pos         + EXCLUDED.totale_pos,
+            totale_buoni       = transazioni_fortech.totale_buoni       + EXCLUDED.totale_buoni,
+            totale_satispay    = transazioni_fortech.totale_satispay    + EXCLUDED.totale_satispay,
+            totale_petrolifere = transazioni_fortech.totale_petrolifere + EXCLUDED.totale_petrolifere
+    ''', params)
+    count = len(params)
 
     conn.commit()
     if close:
@@ -239,24 +240,24 @@ def ingest_contanti(file_path: str, conn=None) -> int:
     text_cols = [c for c in df.columns if df[c].dtype == object]
 
     count = 0
+    params = []
     for _, row in df.iterrows():
         # Concatena tutti i valori di testo della riga per la ricerca
         all_text = " ".join(
             str(row[c]) for c in text_cols if pd.notna(row[c]) and str(row[c]) != "nan"
         )
-        note = str(row.get("Note", "")) if "Note" in df.columns else ""
-
         codice_pv = None
         for ident, pv in ident_map.items():
             if ident and ident in all_text:
                 codice_pv = pv
                 break
+        params.append((row["_data"], codice_pv, row["_importo"], all_text[:500]))
 
-        conn.execute('''
-            INSERT INTO transazioni_contanti (data, codice_pv, importo, note_raw)
-            VALUES (?, ?, ?, ?)
-        ''', (row["_data"], codice_pv, row["_importo"], all_text[:500]))
-        count += 1
+    conn.executemany('''
+        INSERT INTO transazioni_contanti (data, codice_pv, importo, note_raw)
+        VALUES (?, ?, ?, ?)
+    ''', params)
+    count = len(params)
 
     conn.commit()
     if close:
@@ -317,15 +318,17 @@ def ingest_pos(file_path: str, conn=None) -> int:
     df["_importo"] = pd.to_numeric(df[col_importo], errors="coerce").fillna(0.0)
     df = df[df["_importo"] != 0.0].dropna(subset=["_data"])
 
-    count = 0
+    params = []
     for _, row in df.iterrows():
         alias    = str(row[col_alias]).strip() if col_alias else ""
         circuito = str(row[col_circuito]).strip() if col_circuito else ""
-        conn.execute('''
-            INSERT INTO transazioni_pos (data, alias_terminale, importo, circuito)
-            VALUES (?, ?, ?, ?)
-        ''', (row["_data"], alias, row["_importo"], circuito))
-        count += 1
+        params.append((row["_data"], alias, row["_importo"], circuito))
+
+    conn.executemany('''
+        INSERT INTO transazioni_pos (data, alias_terminale, importo, circuito)
+        VALUES (?, ?, ?, ?)
+    ''', params)
+    count = len(params)
 
     conn.commit()
     if close:
@@ -373,7 +376,7 @@ def ingest_satispay(file_path: str, conn=None) -> int:
     # Lista codici PV dal DB
     pv_list = [str(r["codice_pv"]) for r in conn.execute("SELECT codice_pv FROM impianti").fetchall()]
 
-    count = 0
+    params = []
     for _, row in df.iterrows():
         codice_pv = None
         if col_negozio:
@@ -382,12 +385,13 @@ def ingest_satispay(file_path: str, conn=None) -> int:
                 if pv in negozio_str:
                     codice_pv = int(pv)
                     break
+        params.append((row["_data"], codice_pv, row["_importo"]))
 
-        conn.execute('''
-            INSERT INTO transazioni_satispay (data, codice_pv, importo)
-            VALUES (?, ?, ?)
-        ''', (row["_data"], codice_pv, row["_importo"]))
-        count += 1
+    conn.executemany('''
+        INSERT INTO transazioni_satispay (data, codice_pv, importo)
+        VALUES (?, ?, ?)
+    ''', params)
+    count = len(params)
 
     conn.commit()
     if close:
@@ -452,7 +456,7 @@ def ingest_buoni(file_path: str, conn=None) -> int:
 
     pv_list = [str(r["codice_pv"]) for r in conn.execute("SELECT codice_pv FROM impianti").fetchall()]
 
-    count = 0
+    params = []
     for _, row in df.iterrows():
         codice_pv = None
         esercente = str(row[col_esercente]).strip() if col_esercente else ""
@@ -468,11 +472,13 @@ def ingest_buoni(file_path: str, conn=None) -> int:
                     codice_pv = int(pv)
                     break
 
-        conn.execute('''
-            INSERT INTO transazioni_buoni (data, codice_pv, importo, esercente)
-            VALUES (?, ?, ?, ?)
-        ''', (row["_data"], codice_pv, row["_importo"], esercente))
-        count += 1
+        params.append((row["_data"], codice_pv, row["_importo"], esercente))
+
+    conn.executemany('''
+        INSERT INTO transazioni_buoni (data, codice_pv, importo, esercente)
+        VALUES (?, ?, ?, ?)
+    ''', params)
+    count = len(params)
 
     conn.commit()
     if close:

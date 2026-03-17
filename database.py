@@ -1,29 +1,29 @@
 """
-Database module — Lavoro Giupponi6 (Supabase HTTP API Version)
-Risolve i problemi di connessione IPv6 su Render usando supabase-py.
+Database module — Lavoro Giupponi6
+Utilizza l'API HTTP di Supabase (via RPC exec_sql) per massima compatibilità con Render (No IPv6 issues).
+Ottimizzato con batching per evitare timeout.
 """
 import os
 import hashlib
+import json
+import time
+from datetime import datetime
 from supabase import create_client, Client
 from dotenv import load_dotenv
 
 load_dotenv()
 
-URL: str = os.getenv("SUPABASE_URL", "")
-KEY: str = os.getenv("SUPABASE_KEY", "")
+# ── Configurazione ─────────────────────────────────────────────────────────────
+URL = os.getenv("SUPABASE_URL")
+KEY = os.getenv("SUPABASE_KEY")
 
-def get_client() -> Client:
-    if not URL or not KEY:
-        raise ValueError("SUPABASE_URL o SUPABASE_KEY mancanti in .env")
-    return create_client(URL, KEY)
+if not URL or not KEY:
+    raise ValueError("SUPABASE_URL e SUPABASE_KEY devono essere configurate nel .env")
 
+supabase: Client = create_client(URL, KEY)
 
 class DualAccessRow(dict):
-    """
-    Un dict che supporta anche l'accesso per indice numerico (row[0], row[1], ...),
-    mantenendo la compatibilità con il codice che si aspetta dict (row['chiave'])
-    e il codice che si aspetta tuple (row[0]).
-    """
+    """Supporta row['col'] e row[0]."""
     def __init__(self, data):
         if isinstance(data, dict):
             super().__init__(data)
@@ -34,81 +34,141 @@ class DualAccessRow(dict):
 
     def __getitem__(self, key):
         if isinstance(key, int):
-            return self._values[key]
+            return self._values[key] if key < len(self._values) else None
         return super().__getitem__(key)
 
-
 class SupabaseCursor:
-    def __init__(self, data):
-        # Converte ogni riga in DualAccessRow per accesso ibrido dict/tuple
-        if isinstance(data, list):
-            self.data = [DualAccessRow(r) if isinstance(r, dict) else r for r in data]
-        elif isinstance(data, dict):
-            # Il risultato RPC per INSERT/UPDATE/DELETE è un dict singolo
-            self.data = [DualAccessRow(data)]
-        else:
-            self.data = []
+    def __init__(self, results):
+        self.results = results or []
         self.index = 0
 
     def fetchone(self):
-        if self.index < len(self.data):
-            row = self.data[self.index]
+        if self.index < len(self.results):
+            row = self.results[self.index]
             self.index += 1
-            return row
+            return DualAccessRow(row)
         return None
 
     def fetchall(self):
-        return self.data
+        return [DualAccessRow(r) for r in self.results]
 
     def __iter__(self):
-        return iter(self.data)
+        return (DualAccessRow(r) for r in self.results)
 
-
-class SupabaseWrapper:
-    def __init__(self):
-        self.client = get_client()
-
+class SupabaseConnection:
     def execute(self, query, params=None):
-        """Esegue query via RPC exec_sql. Gestisce i parametri ? convertendoli in stringhe SQL safe."""
-        clean_query = query
-        if params:
-            formatted_params = []
-            for p in params:
-                if p is None:
-                    formatted_params.append("NULL")
-                elif isinstance(p, bool):
-                    formatted_params.append("TRUE" if p else "FALSE")
-                elif isinstance(p, (int, float)):
-                    formatted_params.append(str(p))
-                else:
-                    # Stringa: escape apici singoli e racchiudi tra apici
-                    val = str(p).replace("'", "''")
-                    formatted_params.append(f"'{val}'")
-
-            # Sostituiamo i ? uno alla volta (da sinistra a destra)
-            for p_str in formatted_params:
-                clean_query = clean_query.replace("?", p_str, 1)
-
+        sql = self._format_sql(query, params)
         try:
-            res = self.client.rpc("exec_sql", {"query_text": clean_query}).execute()
-            return SupabaseCursor(res.data)
+            # Chiamata RPC alla funzione 'exec_sql' definita su Supabase
+            res = supabase.rpc("exec_sql", {"query": sql}).execute()
+            # Se la query è un SELECT, res.data conterrà le righe.
+            # Se è INSERT/UPDATE, res.data potrebbe essere vuoto o un conteggio.
+            data = res.data if res.data else []
+            if isinstance(data, (int, float, str)): # Fallback se restituisce un numero
+                data = [{"result": data}]
+            return SupabaseCursor(data)
         except Exception as e:
-            msg = str(e)
-            print(f"[DB Error] Query: {clean_query[:120]}... | Errore: {msg}")
-            return SupabaseCursor([])
+            print(f"[Supabase HTTP Error] {e} | Query: {sql[:200]}")
+            raise
+
+    def executemany(self, query, params_list):
+        """Esegue insert multipli in un'unica chiamata per performance."""
+        if not params_list:
+            return
+        
+        # Semplice batching: accorpiamo le query in un unico blocco BEGIN...END o multiple statements
+        # Nota: exec_sql esegue tutto in una transazione se usiamo un blocco
+        batch_size = 50
+        for i in range(0, len(params_list), batch_size):
+            chunk = params_list[i : i + batch_size]
+            combined_sql = "BEGIN;\n"
+            for p in chunk:
+                combined_sql += self._format_sql(query, p).strip().rstrip(';') + ";\n"
+            combined_sql += "COMMIT;"
+            
+            try:
+                supabase.rpc("exec_sql", {"query": combined_sql}).execute()
+            except Exception as e:
+                print(f"[Supabase Batch Error] {e}")
+                # Se fallisce il blocco, proviamo uno alla volta per quel chunk (fallback lento ma sicuro)
+                for p in chunk:
+                    self.execute(query, p)
 
     def commit(self): pass
     def rollback(self): pass
     def close(self): pass
 
+    def _format_sql(self, query, params):
+        if not params:
+            return query
+        
+        # Converte parametri in formato SQL string-safe
+        formatted_params = []
+        for p in params:
+            if p is None:
+                formatted_params.append("NULL")
+            elif isinstance(p, (int, float)):
+                formatted_params.append(str(p))
+            elif isinstance(p, bool):
+                formatted_params.append("TRUE" if p else "FALSE")
+            else:
+                # Stringhe e date: escape dei singoli apici e encoding UTF-8
+                s = str(p).replace("'", "''")
+                formatted_params.append(f"'{s}'")
+        
+        # Sostituisce i placeholder ? con i valori
+        parts = query.split('?')
+        if len(parts) - 1 != len(formatted_params):
+            # Se il numero di ? non coincide, proviamo con %s (stile psycopg2)
+            parts = query.split('%s')
+            
+        res = ""
+        for i in range(len(formatted_params)):
+            res += parts[i] + formatted_params[i]
+        res += parts[-1]
+        return res
 
 def get_connection():
-    return SupabaseWrapper()
-
+    return SupabaseConnection()
 
 def init_db():
-    """Inizializza configurazioni default e utente admin."""
+    """Inizializza le tabelle via RPC."""
     conn = get_connection()
+    # SQL di creazione tabelle (stesso di prima)
+    tables_sql = """
+    CREATE TABLE IF NOT EXISTS impianti (
+        id SERIAL PRIMARY KEY, codice_pv INTEGER NOT NULL UNIQUE, nome TEXT, comune TEXT, indirizzo TEXT, alias_terminale TEXT, tipo_gestione TEXT DEFAULT 'PRESIDIATO'
+    );
+    CREATE TABLE IF NOT EXISTS transazioni_fortech (
+        id SERIAL PRIMARY KEY, codice_pv INTEGER NOT NULL REFERENCES impianti(codice_pv), data TEXT NOT NULL, totale_contante NUMERIC DEFAULT 0, totale_pos NUMERIC DEFAULT 0, totale_buoni NUMERIC DEFAULT 0, totale_satispay NUMERIC DEFAULT 0, totale_petrolifere NUMERIC DEFAULT 0, UNIQUE(codice_pv, data)
+    );
+    CREATE TABLE IF NOT EXISTS transazioni_contanti (
+        id SERIAL PRIMARY KEY, data TEXT NOT NULL, codice_pv INTEGER REFERENCES impianti(codice_pv), importo NUMERIC, note_raw TEXT
+    );
+    CREATE TABLE IF NOT EXISTS transazioni_pos (
+        id SERIAL PRIMARY KEY, data TEXT NOT NULL, alias_terminale TEXT, importo NUMERIC, circuito TEXT
+    );
+    CREATE TABLE IF NOT EXISTS transazioni_satispay (
+        id SERIAL PRIMARY KEY, data TEXT NOT NULL, codice_pv INTEGER REFERENCES impianti(codice_pv), importo NUMERIC
+    );
+    CREATE TABLE IF NOT EXISTS transazioni_buoni (
+        id SERIAL PRIMARY KEY, data TEXT NOT NULL, codice_pv INTEGER REFERENCES impianti(codice_pv), importo NUMERIC, esercente TEXT
+    );
+    CREATE TABLE IF NOT EXISTS transazioni_petrolifere (
+        id SERIAL PRIMARY KEY, data TEXT NOT NULL, codice_pv INTEGER REFERENCES impianti(codice_pv), importo NUMERIC
+    );
+    CREATE TABLE IF NOT EXISTS riconciliazione_risultati (
+        id SERIAL PRIMARY KEY, codice_pv INTEGER NOT NULL REFERENCES impianti(codice_pv), data TEXT NOT NULL, categoria TEXT NOT NULL, valore_teorico NUMERIC DEFAULT 0, valore_reale   NUMERIC DEFAULT 0, differenza     NUMERIC DEFAULT 0, stato          TEXT DEFAULT 'IN_ATTESA', note           TEXT, UNIQUE(codice_pv, data, categoria)
+    );
+    CREATE TABLE IF NOT EXISTS contanti_matching (
+        id SERIAL PRIMARY KEY, codice_pv INTEGER NOT NULL REFERENCES impianti(codice_pv), data TEXT NOT NULL, contanti_teorico NUMERIC DEFAULT 0, contanti_versato NUMERIC DEFAULT 0, differenza       NUMERIC DEFAULT 0, stato            TEXT DEFAULT 'IN_ATTESA', tipo_match       TEXT DEFAULT 'nessuno', risolto          BOOLEAN DEFAULT FALSE, verificato_da    TEXT, data_verifica    TEXT, note             TEXT, UNIQUE(codice_pv, data)
+    );
+    CREATE TABLE IF NOT EXISTS config (chiave TEXT PRIMARY KEY, valore TEXT);
+    CREATE TABLE IF NOT EXISTS users (username TEXT PRIMARY KEY, password_hash TEXT NOT NULL);
+    """
+    conn.execute(tables_sql)
+
+    # Dati di default
     defaults = {
         'tolleranza_contanti_arrotondamento': '2.00',
         'tolleranza_carte_fisiologica':       '1.00',
@@ -118,29 +178,19 @@ def init_db():
         'scarto_giorni_buoni':                '1',
         'scarto_giorni_contanti_inf':         '3',
         'scarto_giorni_contanti_sup':         '7',
-        'openrouter_api_key':                 '',
     }
     for k, v in defaults.items():
-        conn.execute(
-            "INSERT INTO config (chiave, valore) VALUES (?, ?) ON CONFLICT (chiave) DO NOTHING",
-            (k, v)
-        )
-
+        conn.execute("INSERT INTO config (chiave, valore) VALUES (?, ?) ON CONFLICT (chiave) DO NOTHING", (k, v))
+    
     pw_hash = hashlib.sha256("calor2024".encode()).hexdigest()
-    conn.execute(
-        "INSERT INTO users (username, password_hash) VALUES (?, ?) "
-        "ON CONFLICT (username) DO UPDATE SET password_hash = EXCLUDED.password_hash",
-        ("admin", pw_hash)
-    )
-    print("[DB] Supabase HTTP API inizializzata con successo.")
-
+    conn.execute("INSERT INTO users (username, password_hash) VALUES (?, ?) ON CONFLICT (username) DO UPDATE SET password_hash = EXCLUDED.password_hash", ("admin", pw_hash))
+    
+    print("[DB] HTTP Supabase inizializzato.")
 
 def get_config(conn=None) -> dict:
-    if conn is None:
-        conn = get_connection()
+    if conn is None: conn = get_connection()
     rows = conn.execute("SELECT chiave, valore FROM config").fetchall()
     return {r['chiave']: r['valore'] for r in rows}
-
 
 if __name__ == "__main__":
     init_db()
