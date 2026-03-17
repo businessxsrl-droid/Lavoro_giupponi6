@@ -10,8 +10,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # PROVA 2: Utilizzo del POOLER di Supabase invece della connessione diretta
-# DATABASE_URL=postgresql://postgres.[REF]:[PASSWORD]@aws-0-eu-west-1.pooler.supabase.com:6543/postgres?sslmode=require
-DB_URL = os.getenv("DATABASE_URL_POOLER") or os.getenv("DATABASE_URL")
+DB_URL = (os.getenv("DATABASE_URL_POOLER") or os.getenv("DATABASE_URL") or "").strip()
 
 class PostgresCursorWrapper:
     def __init__(self, cursor):
