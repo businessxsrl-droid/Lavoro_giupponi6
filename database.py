@@ -85,7 +85,7 @@ def init_db():
         conn.execute("INSERT INTO config (chiave, valore) VALUES (?, ?) ON CONFLICT (chiave) DO NOTHING", (k, v))
     
     pw_hash = hashlib.sha256("calor2024".encode()).hexdigest()
-    conn.execute("INSERT INTO users (username, password_hash) VALUES (?, ?) ON CONFLICT (username) DO NOTHING", ("admin", pw_hash))
+    conn.execute("INSERT INTO users (username, password_hash) VALUES (?, ?) ON CONFLICT (username) DO UPDATE SET password_hash = EXCLUDED.password_hash", ("admin", pw_hash))
     print("[DB] Supabase HTTP API inizializzata.")
 
 def get_config(conn=None) -> dict:
