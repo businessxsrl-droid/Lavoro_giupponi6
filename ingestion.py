@@ -597,7 +597,7 @@ def ingest_folder(folder: str) -> dict:
     # Svuota le tabelle reali (ma non fortech) per reimportare da zero
     for tbl in ("transazioni_contanti", "transazioni_pos", "transazioni_satispay",
                 "transazioni_buoni", "transazioni_petrolifere", "transazioni_fortech"):
-        conn.execute(f"DELETE FROM {tbl}")
+        conn.execute(f"DELETE FROM {tbl} WHERE TRUE")
     conn.commit()
 
     # Carica anagrafica impianti all'inizio

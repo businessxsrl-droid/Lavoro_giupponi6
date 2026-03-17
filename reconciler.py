@@ -237,7 +237,7 @@ def reconcile(conn=None) -> int:
         "carte_petrolifere": float(cfg.get("tolleranza_petrolifere",          0.01)),
     }
 
-    conn.execute("DELETE FROM riconciliazione_risultati")
+    conn.execute("DELETE FROM riconciliazione_risultati WHERE TRUE")
 
     df_f = _carica_fortech(conn)
     if df_f.empty:
@@ -292,7 +292,7 @@ def _reconcile_contanti_matching(conn, cfg: dict):
         "FROM transazioni_contanti WHERE codice_pv IS NOT NULL "
         "GROUP BY codice_pv, data ORDER BY codice_pv, data", conn)
 
-    conn.execute("DELETE FROM contanti_matching")
+    conn.execute("DELETE FROM contanti_matching WHERE TRUE")
 
     if df_fort.empty:
         conn.commit()
