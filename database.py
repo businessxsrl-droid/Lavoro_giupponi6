@@ -76,23 +76,57 @@ class SupabaseConnection:
         if not params_list:
             return
         
-        # Semplice batching: accorpiamo le query in un unico blocco BEGIN...END o multiple statements
-        # Nota: exec_sql esegue tutto in una transazione se usiamo un blocco
-        batch_size = 50
+        # Aumentiamo la dimensione del batch
+        batch_size = 200
+        
         for i in range(0, len(params_list), batch_size):
             chunk = params_list[i : i + batch_size]
+            
+            # Ottimizzazione: se è un INSERT semplice, possiamo trasformarlo in un multi-value INSERT
+            # Es: INSERT INTO t (a,b) VALUES (?,?) -> INSERT INTO t (a,b) VALUES (1,2), (3,4)
+            upper_query = query.strip().upper()
+            if upper_query.startswith("INSERT INTO") and "VALUES (" in upper_query:
+                try:
+                    base_sql = query.split("VALUES")[0] + " VALUES "
+                    values_parts = []
+                    for p in chunk:
+                        # Estraiamo la riga formattata (senza l'intestazione INSERT INTO)
+                        # Usiamo un placeholder temporaneo per formattare solo i valori
+                        formatted_row = self._format_sql("VALUES (?)", [p])
+                        # Prendi solo quello che c'è tra le parentesi tonde estreme
+                        row_vals = formatted_row[formatted_row.find("("):]
+                        values_parts.append(row_vals)
+                    
+                    # Gestione ON CONFLICT (se presente)
+                    tail = ""
+                    conflict_idx = query.upper().find("ON CONFLICT")
+                    if conflict_idx != -1:
+                        tail = " " + query[conflict_idx:]
+                    
+                    combined_sql = base_sql + ", ".join(values_parts) + tail
+                    supabase.rpc("exec_sql", {"query": combined_sql}).execute()
+                    continue # Successo con multi-value insert
+                except Exception as e:
+                    print(f"[Supabase Multi-Value Error] {e} - Falling back to block")
+
+            # Fallback: Blocco BEGIN...COMMIT (per query complesse o se fallisce sopra)
             combined_sql = "BEGIN;\n"
             for p in chunk:
-                combined_sql += self._format_sql(query, p).strip().rstrip(';') + ";\n"
+                # Aggiungiamo WHERE TRUE alle DELETE se necessario (ma executemany di solito è per INSERT)
+                stmt = self._format_sql(query, p).strip().rstrip(';')
+                combined_sql += stmt + ";\n"
             combined_sql += "COMMIT;"
             
             try:
                 supabase.rpc("exec_sql", {"query": combined_sql}).execute()
             except Exception as e:
                 print(f"[Supabase Batch Error] {e}")
-                # Se fallisce il blocco, proviamo uno alla volta per quel chunk (fallback lento ma sicuro)
+                # Fallback lento riga per riga se tutto il blocco fallisce
                 for p in chunk:
-                    self.execute(query, p)
+                    try:
+                        self.execute(query, p)
+                    except:
+                        pass
 
     def commit(self): pass
     def rollback(self): pass

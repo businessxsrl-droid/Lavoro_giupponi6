@@ -543,7 +543,7 @@ def ingest_petrolifere(file_path: str, conn=None) -> int:
     # Carica i PV validi per evitare errori di foreign key
     valid_pvs = {r[0] for r in conn.execute("SELECT codice_pv FROM impianti").fetchall()}
 
-    count = 0
+    params = []
     for _, row in df.iterrows():
         importo = row["_importo"]
         if col_segno:
@@ -557,15 +557,16 @@ def ingest_petrolifere(file_path: str, conn=None) -> int:
         except Exception:
             codice_pv = None
 
-        # Se il PV non è nell'anagrafica, metti NULL (non perdiamo la riga)
         if codice_pv not in valid_pvs:
             codice_pv = None
 
-        conn.execute('''
-            INSERT INTO transazioni_petrolifere (data, codice_pv, importo)
-            VALUES (?, ?, ?)
-        ''', (row["_data"], codice_pv, importo))
-        count += 1
+        params.append((row["_data"], codice_pv, importo))
+
+    conn.executemany('''
+        INSERT INTO transazioni_petrolifere (data, codice_pv, importo)
+        VALUES (?, ?, ?)
+    ''', params)
+    count = len(params)
 
     conn.commit()
     if close:
