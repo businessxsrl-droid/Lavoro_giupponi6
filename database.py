@@ -73,68 +73,54 @@ class SupabaseConnection:
 
     def executemany(self, query, params_list):
         """Esegue insert multipli in un'unica chiamata per performance."""
-        if not params_list:
-            return
+        if not params_list: return
         
-        # Aumentiamo la dimensione del batch
-        batch_size = 200
-        
-        for i in range(0, len(params_list), batch_size):
-            chunk = params_list[i : i + batch_size]
-            
-            # Ottimizzazione: se è un INSERT semplice, possiamo trasformarlo in un multi-value INSERT
-            # Es: INSERT INTO t (a,b) VALUES (?,?) -> INSERT INTO t (a,b) VALUES (1,2), (3,4)
-            upper_query = query.strip().upper()
-            if upper_query.startswith("INSERT INTO") and "VALUES (" in upper_query:
-                try:
-                    base_sql = query.split("VALUES")[0] + " VALUES "
-                    values_parts = []
-                    for p in chunk:
-                        # Estraiamo la riga formattata (senza l'intestazione INSERT INTO)
-                        # Usiamo un placeholder temporaneo per formattare solo i valori
-                        formatted_row = self._format_sql("VALUES (?)", [p])
-                        # Prendi solo quello che c'è tra le parentesi tonde estreme
-                        row_vals = formatted_row[formatted_row.find("("):]
-                        values_parts.append(row_vals)
-                    
-                    # Gestione ON CONFLICT (se presente)
-                    tail = ""
-                    conflict_idx = query.upper().find("ON CONFLICT")
-                    if conflict_idx != -1:
-                        tail = " " + query[conflict_idx:]
-                    
-                    combined_sql = base_sql + ", ".join(values_parts) + tail
-                    supabase.rpc("exec_sql", {"query": combined_sql}).execute()
-                    continue # Successo con multi-value insert
-                except Exception as e:
-                    print(f"[Supabase Multi-Value Error] {e} - Falling back to block")
-
-            # Fallback: Blocco BEGIN...COMMIT (per query complesse o se fallisce sopra)
-            combined_sql = "BEGIN;\n"
-            for p in chunk:
-                # Aggiungiamo WHERE TRUE alle DELETE se necessario (ma executemany di solito è per INSERT)
-                stmt = self._format_sql(query, p).strip().rstrip(';')
-                combined_sql += stmt + ";\n"
-            combined_sql += "COMMIT;"
-            
+        q_upper = query.strip().upper()
+        # Se è un INSERT con VALUES, usiamo multi-row insert (molto più veloce)
+        if q_upper.startswith("INSERT INTO") and "VALUES" in q_upper:
             try:
-                supabase.rpc("exec_sql", {"query": combined_sql}).execute()
-            except Exception as e:
-                print(f"[Supabase Batch Error] {e}")
-                # Fallback lento riga per riga se tutto il blocco fallisce
-                for p in chunk:
+                parts = query.split("VALUES")
+                base = parts[0] + " VALUES "
+                
+                # Estraiamo i placeholder (es: "(?, ?, ?)" o "(%s, %s)") e l'eventuale ON CONFLICT
+                values_part = parts[1]
+                on_conflict_idx = values_part.upper().find("ON CONFLICT")
+                
+                if on_conflict_idx != -1:
+                    placeholders = values_part[:on_conflict_idx].strip()
+                    tail = " " + values_part[on_conflict_idx:]
+                else:
+                    placeholders = values_part.strip()
+                    tail = ""
+                
+                batch_size = 100 # Bilanciamento tra velocità e dimensione payload
+                for i in range(0, len(params_list), batch_size):
+                    chunk = params_list[i : i + batch_size]
+                    rows_sql = [self._format_sql(placeholders, p) for p in chunk]
+                    combined_sql = base + ", ".join(rows_sql) + tail
+                    
                     try:
-                        self.execute(query, p)
-                    except:
-                        pass
+                        supabase.rpc("exec_sql", {"query": combined_sql}).execute()
+                    except Exception as e:
+                        print(f"[DB Batch Error] Chiamata fallita, provo record singolarmente: {e}")
+                        for p in chunk:
+                            try: self.execute(query, p)
+                            except: pass
+                return
+            except Exception as e:
+                print(f"[DB Optimization Error] Fallback al loop standard: {e}")
+
+        # Fallback universale (loop per query non-insert o se l'ottimizzazione fallisce)
+        for p in params_list:
+            try: self.execute(query, p)
+            except: pass
 
     def commit(self): pass
     def rollback(self): pass
     def close(self): pass
 
     def _format_sql(self, query, params):
-        if not params:
-            return query
+        if not params: return query
         
         # Converte parametri in formato SQL string-safe
         formatted_params = []
@@ -146,20 +132,22 @@ class SupabaseConnection:
             elif isinstance(p, bool):
                 formatted_params.append("TRUE" if p else "FALSE")
             else:
-                # Stringhe e date: escape dei singoli apici e encoding UTF-8
+                # Stringhe e date: escape dei singoli apici
                 s = str(p).replace("'", "''")
                 formatted_params.append(f"'{s}'")
         
-        # Sostituisce i placeholder ? con i valori
-        parts = query.split('?')
-        if len(parts) - 1 != len(formatted_params):
-            # Se il numero di ? non coincide, proviamo con %s (stile psycopg2)
-            parts = query.split('%s')
-            
+        # Sostituisce i placeholder (? o %s) in modo posizionale sicuro
+        parts = query.split('?') if '?' in query else query.split('%s')
+        
         res = ""
-        for i in range(len(formatted_params)):
+        # Uniamo le parti alternando con i parametri formattati
+        for i in range(min(len(parts) - 1, len(formatted_params))):
             res += parts[i] + formatted_params[i]
-        res += parts[-1]
+        
+        # Aggiungiamo l'ultima parte di query o quelle rimanenti
+        if len(parts) > len(formatted_params):
+            res += "".join(parts[len(formatted_params):])
+        
         return res
 
 def get_connection():
