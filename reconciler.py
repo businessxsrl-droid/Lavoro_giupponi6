@@ -327,23 +327,12 @@ def reconcile(conn=None) -> int:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _reconcile_contanti_matching(conn, cfg: dict):
-    """
-    Algoritmo di matching contanti per la vista Simona.
-    Per ogni giornata Fortech con contante > 0, cerca il versamento bancario
-    corrispondente nell'intervallo di giorni configurato.
-    Gestisce:
-      - Match 1:1 esatto (entro tolleranza)
-      - Match 1:1 arrotondato (entro tolleranza*3)
-      - Match cumulativo 2-4gg (somma di giorni Fortech = un versamento AS400)
-    """
     tolleranza  = float(cfg.get("tolleranza_contanti_arrotondamento", 2.00))
-    giorni_inf  = int(float(cfg.get("scarto_giorni_contanti_inf", 3)))
-    giorni_sup  = int(float(cfg.get("scarto_giorni_contanti_sup", 7)))
 
     cols_fort = ["codice_pv", "data", "totale_contante"]
     df_fort = _to_df(conn,
         "SELECT codice_pv, data, totale_contante FROM transazioni_fortech "
-        "WHERE totale_contante > 0 ORDER BY codice_pv, data", cols_fort)
+        "ORDER BY codice_pv, data", cols_fort)
         
     cols_as4 = ["codice_pv", "data", "importo"]
     df_as400 = _to_df(conn,
@@ -353,152 +342,58 @@ def _reconcile_contanti_matching(conn, cfg: dict):
 
     conn.execute("DELETE FROM contanti_matching WHERE TRUE")
 
-    if df_fort.empty:
+    if df_fort.empty and df_as400.empty:
         conn.commit()
         return
 
-    # Dizionario AS400 per lookup veloce: (pv, data) → importo
-    as400_dict: dict[tuple, float] = {}
-    if not df_as400.empty:
-        for _, r in df_as400.iterrows():
-            as400_dict[(int(r["codice_pv"]), r["data"])] = float(r["importo"])
+    fort_data = {}
+    for _, r in df_fort.iterrows():
+        fort_data[(int(r["codice_pv"]), r["data"])] = float(r["totale_contante"])
+        
+    as400_data = {}
+    for _, r in df_as400.iterrows():
+        as400_data[(int(r["codice_pv"]), r["data"])] = float(r["importo"])
+
+    pvs = sorted(list(set(df_fort["codice_pv"].unique()) | set(df_as400["codice_pv"].unique())))
+    all_dates = sorted(list(set(df_fort["data"].unique()) | set(df_as400["data"].unique())))
 
     results = []
-    used_as400 = set()  # versamenti già utilizzati
-
-    pv_list = df_fort["codice_pv"].unique()
-
-    for pv in pv_list:
-        pv = int(pv)
-        fort_pv = df_fort[df_fort["codice_pv"] == pv].sort_values("data").copy()
+    
+    for pv in pvs:
+        pv_int = int(pv)
+        scarto_precedente = 0.0
         
-        # 1. PRE-PASS: Match Settimanale (Lunedì - Domenica)
-        # Identifichiamo il lunedì di ogni riga per raggruppare per settimana
-        fort_pv['dt'] = pd.to_datetime(fort_pv['data'])
-        fort_pv['monday'] = fort_pv['dt'] - pd.to_timedelta(fort_pv['dt'].dt.weekday, unit='D')
-        
-        weekly_matched_dates = set()
-        
-        for monday, week_data in fort_pv.groupby('monday'):
-            sunday = monday + timedelta(days=6)
-            monday_str = monday.strftime("%Y-%m-%d")
-            sunday_str = sunday.strftime("%Y-%m-%d")
+        for d_str in all_dates:
+            t = fort_data.get((pv_int, d_str), 0.0)
+            v = as400_data.get((pv_int, d_str), 0.0)
             
-            # Range di ricerca versamenti: includiamo fino al martedì successivo per il weekend
-            limit_search = sunday + timedelta(days=2)
-            limit_search_str = limit_search.strftime("%Y-%m-%d")
-            
-            sum_teorico = float(week_data["totale_contante"].sum())
-            if sum_teorico <= 0:
+            if t == 0 and v == 0 and abs(scarto_precedente) < 0.01:
                 continue
                 
-            # Prendiamo tutti i versamenti del periodo che non sono già stati usati
-            as400_potential = [
-                (d, imp) for (p, d), imp in as400_dict.items()
-                if p == pv and monday_str <= d <= limit_search_str and (p, d) not in used_as400
-            ]
-            sum_reale = sum(imp for d, imp in as400_potential)
+            differenza_giorno = round(t + scarto_precedente - v, 2)
+            tipo_match = "bilancio_continuo"
             
-            # Se la settimana quadra nell'aggregato
-            if abs(sum_teorico - sum_reale) <= tolleranza * len(week_data):
-                for _, frow in week_data.iterrows():
-                    d_str = frow["data"]
-                    # Inseriamo il record come "QUADRATO" usando il teorico come versato (visto che la settimana quadra)
-                    results.append((pv, d_str, frow["totale_contante"], frow["totale_contante"], 0.0, ST_QUADRATO, "settimanale"))
-                    weekly_matched_dates.add(d_str)
-                
-                # Marciamo i versamenti come usati
-                for d, imp in as400_potential:
-                    used_as400.add((pv, d))
-
-        # 2. PASSAGGIO STANDARD: per le date non coperte dal match settimanale
-        for _, frow in fort_pv.iterrows():
-            data_str = frow["data"]
-            if data_str in weekly_matched_dates:
-                continue
-                
-            teorico = float(frow["totale_contante"])
-            data_dt = datetime.strptime(data_str, "%Y-%m-%d")
-            versato    = 0.0
-            tipo_match = "nessuno"
-
-            # Finestra di ricerca standard
-            date_from = (data_dt - timedelta(days=giorni_inf)).strftime("%Y-%m-%d")
-            date_to   = (data_dt + timedelta(days=giorni_sup)).strftime("%Y-%m-%d")
-
-            as400_in_range = [
-                (d, imp) for (p, d), imp in as400_dict.items()
-                if p == pv and date_from <= d <= date_to and (p, d) not in used_as400
-            ]
-
-            # 1:1 esatto
-            same_day = as400_dict.get((pv, data_str))
-            if same_day is not None and (pv, data_str) not in used_as400:
-                diff = abs(teorico - same_day)
-                if diff <= tolleranza:
-                    versato = same_day
-                    tipo_match = "1:1_esatto"
-                    used_as400.add((pv, data_str))
-                elif diff <= tolleranza * 3:
-                    versato = same_day
-                    tipo_match = "1:1_arrotondato"
-                    used_as400.add((pv, data_str))
-
-            # 1:1 in range
-            if tipo_match == "nessuno":
-                for (d, imp) in sorted(as400_in_range, key=lambda x: abs(datetime.strptime(x[0], "%Y-%m-%d") - data_dt)):
-                    diff = abs(teorico - imp)
-                    if diff <= tolleranza:
-                        versato = imp; tipo_match = "1:1_esatto"
-                        used_as400.add((pv, d)); break
-                    elif diff <= tolleranza * 3:
-                        versato = imp; tipo_match = "1:1_arrotondato"
-                        used_as400.add((pv, d)); break
-
-            # Cumulativo 2-4 gg
-            if tipo_match == "nessuno":
-                for window in (2, 3, 4):
-                    window_rows = fort_pv[
-                        (fort_pv["data"] >= data_str) &
-                        (fort_pv["data"] <= (data_dt + timedelta(days=window - 1)).strftime("%Y-%m-%d"))
-                    ]
-                    if len(window_rows) < 2: continue
-                    sum_t = float(window_rows["totale_contante"].sum())
-                    for (d, imp) in as400_in_range:
-                        if abs(sum_t - imp) <= tolleranza * window:
-                            versato = imp; tipo_match = f"cumulativo_{window}gg"
-                            used_as400.add((pv, d)); break
-                    if tipo_match != "nessuno": break
-
-            diff_finale = round(teorico - versato, 2)
-            if tipo_match == "1:1_esatto":
+            if abs(differenza_giorno) <= tolleranza:
                 stato = ST_QUADRATO
-            elif tipo_match == "1:1_arrotondato" or tipo_match.startswith("cumulativo"):
-                stato = ST_QUADRATO_ARROT if abs(diff_finale) <= tolleranza * 3 else ST_ANOMALIA_LIEVE
-            elif versato == 0 and teorico == 0:
-                stato = None
-            elif versato == 0:
-                stato = ST_NON_TROVATO
+                scarto_precedente = 0.0
             else:
-                stato = ST_ANOMALIA_GRAVE if abs(diff_finale) > _ANOMALIA_GRAVE_THRESHOLD else ST_ANOMALIA_LIEVE
+                if abs(differenza_giorno) > _ANOMALIA_GRAVE_THRESHOLD:
+                    stato = ST_ANOMALIA_GRAVE
+                else:
+                    stato = ST_ANOMALIA_LIEVE
+                scarto_precedente = differenza_giorno
+            
+            results.append((pv_int, d_str, t, v, differenza_giorno, stato, tipo_match))
 
-            if stato:
-                results.append((pv, data_str, teorico, versato, diff_finale, stato, tipo_match))
-
-    conn.executemany('''
-        INSERT INTO contanti_matching
-            (codice_pv, data, contanti_teorico, contanti_versato, differenza, stato, tipo_match)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(codice_pv, data) DO UPDATE SET
-            contanti_teorico  = EXCLUDED.contanti_teorico,
-            contanti_versato  = EXCLUDED.contanti_versato,
-            differenza        = EXCLUDED.differenza,
-            stato             = EXCLUDED.stato,
-            tipo_match        = EXCLUDED.tipo_match
-    ''', results)
+    if results:
+        conn.executemany('''
+            INSERT INTO contanti_matching
+                (codice_pv, data, contanti_teorico, contanti_versato, differenza, stato, tipo_match)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', results)
 
     conn.commit()
-    print(f"[reconcile] contanti_matching: {len(results)} record")
+    print(f"[reconcile] contanti_matching (rolling): {len(results)} record")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
