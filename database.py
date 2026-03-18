@@ -163,11 +163,33 @@ class SupabaseConnection:
         
         return res
 
+class PostgresCursor:
+    def __init__(self, cursor):
+        self._cursor = cursor
+
+    def fetchone(self):
+        row = self._cursor.fetchone()
+        return DualAccessRow(dict(row)) if row else None
+
+    def fetchall(self):
+        return [DualAccessRow(dict(r)) for r in self._cursor.fetchall()]
+
+    def __iter__(self):
+        for r in self._cursor:
+            yield DualAccessRow(dict(r))
+
+    @property
+    def rowcount(self):
+        return self._cursor.rowcount
+
 class PostgresConnection:
     def __init__(self, url):
         self._url = url
         self._conn = psycopg2.connect(url, cursor_factory=RealDictCursor)
         self._conn.autocommit = True
+
+    def cursor(self):
+        return PostgresCursor(self._conn.cursor())
 
     def execute(self, query, params=None):
         # Converte ? in %s per compatibilità con psycopg2
@@ -175,10 +197,11 @@ class PostgresConnection:
         cur = self._conn.cursor()
         try:
             cur.execute(q, params)
-            return cur
+            return PostgresCursor(cur)
         except Exception as e:
             print(f"[Postgres Error] {e} | Query: {q[:200]}")
             raise
+
 
     def executemany(self, query, params_list):
         if not params_list: return
