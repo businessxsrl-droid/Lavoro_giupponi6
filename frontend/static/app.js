@@ -608,7 +608,11 @@ async function loadRiconciliazioni() {
                                     </td>
                                     
                                     <td style="text-align: right; font-weight: bold;" id="diff-cell-${r.id}">${renderDiff(r.differenza)}</td>
-                                    <td id="stato-cell-${r.id}">${renderStatus(r.stato)}</td>
+                                    <td id="stato-cell-${r.id}" style="white-space: nowrap;">
+                                        ${renderStatus(r.stato)}
+                                        ${r.tipo_match && r.tipo_match !== 'nessuno' ? `<span style="margin-left:5px; cursor:help;" title="${TIPO_MATCH_LABELS[r.tipo_match]?.label || r.tipo_match}">${TIPO_MATCH_LABELS[r.tipo_match]?.icon || ''}</span>` : ''}
+                                    </td>
+
                                     
                                     <td style="font-size: 11px; color: var(--text-secondary); line-height: 1.4;">
                                         <span class="val-note-text" id="note-txt-${r.id}">${r.note || ''}</span>
@@ -794,10 +798,12 @@ const TIPO_MATCH_LABELS = {
     'cumulativo_3gg': { label: 'Cumulativo 3gg', icon: '📦', css: 'tm-cumulativo' },
     'cumulativo_4gg': { label: 'Cumulativo 4gg', icon: '📦', css: 'tm-cumulativo' },
     'settimanale': { label: 'Settimanale', icon: '📅', css: 'tm-cumulativo' },
+    'look_ahead_fifo': { label: 'Bilancio C.', icon: '🔄', css: 'tm-cumulativo' },
     'nessuno': { label: 'Nessun Match', icon: '❌', css: 'tm-nessuno' },
     'zero': { label: 'Niente Contanti', icon: '—', css: 'tm-zero' },
     '': { label: 'Legacy', icon: '📋', css: 'tm-legacy' },
 };
+
 
 function renderTipoMatch(tipo) {
     const t = TIPO_MATCH_LABELS[tipo] || TIPO_MATCH_LABELS[''];

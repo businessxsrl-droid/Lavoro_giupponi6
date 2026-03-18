@@ -287,8 +287,9 @@ def get_riconciliazioni():
 
     query  = '''
         SELECT r.id, r.codice_pv, r.data, r.categoria,
-               r.valore_teorico, r.valore_reale, r.differenza, r.stato, r.note,
+               r.valore_teorico, r.valore_reale, r.differenza, r.stato, r.note, r.tipo_match,
                i.nome AS nome_pv
+
         FROM riconciliazione_risultati r
         LEFT JOIN impianti i ON r.codice_pv = i.codice_pv
         WHERE 1=1
@@ -318,7 +319,9 @@ def get_riconciliazioni():
         "valore_reale":  r["valore_reale"],
         "differenza":    r["differenza"],
         "stato":         r["stato"],
+        "tipo_match":    r["tipo_match"] or "nessuno",
         "note":          r["note"] or "",
+
     } for r in rows])
 
 
@@ -396,7 +399,8 @@ def export_excel():
 
     query  = '''
         SELECT r.data, i.nome AS impianto, r.categoria,
-               r.valore_teorico, r.valore_reale, r.differenza, r.stato, r.note
+               r.valore_teorico, r.valore_reale, r.differenza, r.stato, r.note, r.tipo_match
+
         FROM riconciliazione_risultati r
         LEFT JOIN impianti i ON r.codice_pv = i.codice_pv
         WHERE 1=1

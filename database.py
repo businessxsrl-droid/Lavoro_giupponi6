@@ -180,8 +180,9 @@ def init_db():
         id SERIAL PRIMARY KEY, data TEXT NOT NULL, codice_pv INTEGER REFERENCES impianti(codice_pv), importo NUMERIC
     );
     CREATE TABLE IF NOT EXISTS riconciliazione_risultati (
-        id SERIAL PRIMARY KEY, codice_pv INTEGER NOT NULL REFERENCES impianti(codice_pv), data TEXT NOT NULL, categoria TEXT NOT NULL, valore_teorico NUMERIC DEFAULT 0, valore_reale   NUMERIC DEFAULT 0, differenza     NUMERIC DEFAULT 0, stato          TEXT DEFAULT 'IN_ATTESA', note           TEXT, UNIQUE(codice_pv, data, categoria)
+        id SERIAL PRIMARY KEY, codice_pv INTEGER NOT NULL REFERENCES impianti(codice_pv), data TEXT NOT NULL, categoria TEXT NOT NULL, valore_teorico NUMERIC DEFAULT 0, valore_reale   NUMERIC DEFAULT 0, differenza     NUMERIC DEFAULT 0, stato          TEXT DEFAULT 'IN_ATTESA', tipo_match     TEXT DEFAULT 'nessuno', note           TEXT, UNIQUE(codice_pv, data, categoria)
     );
+
     CREATE TABLE IF NOT EXISTS contanti_matching (
         id SERIAL PRIMARY KEY, codice_pv INTEGER NOT NULL REFERENCES impianti(codice_pv), data TEXT NOT NULL, contanti_teorico NUMERIC DEFAULT 0, contanti_versato NUMERIC DEFAULT 0, differenza       NUMERIC DEFAULT 0, stato            TEXT DEFAULT 'IN_ATTESA', tipo_match       TEXT DEFAULT 'nessuno', risolto          BOOLEAN DEFAULT FALSE, verificato_da    TEXT, data_verifica    TEXT, note             TEXT, UNIQUE(codice_pv, data)
     );

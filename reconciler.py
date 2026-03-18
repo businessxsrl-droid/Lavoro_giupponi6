@@ -19,13 +19,15 @@ _ANOMALIA_GRAVE_THRESHOLD = 50.0   # EUR oltre il quale è grave
 
 _SQL_UPSERT = '''
     INSERT INTO riconciliazione_risultati
-        (codice_pv, data, categoria, valore_teorico, valore_reale, differenza, stato)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+        (codice_pv, data, categoria, valore_teorico, valore_reale, differenza, stato, tipo_match)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(codice_pv, data, categoria) DO UPDATE SET
         valore_teorico = excluded.valore_teorico,
         valore_reale   = excluded.valore_reale,
         differenza     = excluded.differenza,
-        stato          = excluded.stato
+        stato          = excluded.stato,
+        tipo_match     = excluded.tipo_match
+
 '''
 
 
@@ -92,33 +94,34 @@ def _carica_fortech(conn) -> pd.DataFrame:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _reconcile_contanti(conn, df_f: pd.DataFrame, tol: float) -> int:
-    """Riconcilia i contanti confrontando i totali per data esatta."""
-    cols = ["codice_pv", "data", "reale"]
-    df_reale = _to_df(conn, 
-        "SELECT codice_pv, data, SUM(importo) AS reale "
-        "FROM transazioni_contanti WHERE codice_pv IS NOT NULL "
-        "GROUP BY codice_pv, data", cols)
-
-    m = df_f[["codice_pv", "data", "totale_contante"]].copy()
-    if not df_reale.empty:
-        df_reale["codice_pv"] = df_reale["codice_pv"].astype(int)
-        m = m.merge(df_reale, on=["codice_pv", "data"], how="left")
-    else:
-        m["reale"] = 0.0
-    m.fillna(0.0, inplace=True)
+    """
+    Sincronizza i risultati della logica Look-Ahead FIFO (da contanti_matching)
+    nella tabella generale riconciliazione_risultati.
+    """
+    rows = conn.execute('''
+        SELECT codice_pv, data, contanti_teorico, contanti_versato, differenza, stato, tipo_match
+        FROM contanti_matching
+    ''').fetchall()
 
     params = []
-    for _, row in m.iterrows():
-        teorico = float(row["totale_contante"])
-        reale   = float(row["reale"])
-        stato   = _calcola_stato(teorico, reale, tol)
-        if stato:
-            diff = round(teorico - reale, 2)
-            params.append((int(row["codice_pv"]), row["data"], "contanti", teorico, reale, diff, stato))
+    for r in rows:
+        params.append((
+            int(r["codice_pv"]), 
+            r["data"], 
+            "contanti", 
+            float(r["contanti_teorico"]), 
+            float(r["contanti_versato"]), 
+            float(r["differenza"]), 
+            r["stato"],
+            r["tipo_match"]
+        ))
+
     
-    conn.executemany(_SQL_UPSERT, params)
+    if params:
+        conn.executemany(_SQL_UPSERT, params)
+        
     count = len(params)
-    print(f"  [contanti]      {count} record")
+    print(f"  [contanti]      {count} record (sincronizzati da rolling)")
     return count
 
 
@@ -158,7 +161,8 @@ def _reconcile_carte_bancarie(conn, df_f: pd.DataFrame, tol: float) -> int:
         stato   = _calcola_stato(teorico, reale, tol)
         if stato:
             diff = round(teorico - reale, 2)
-            params.append((int(row["codice_pv"]), row["data"], "carte_bancarie", teorico, reale, diff, stato))
+            params.append((int(row["codice_pv"]), row["data"], "carte_bancarie", teorico, reale, diff, stato, "nessuno"))
+
     
     conn.executemany(_SQL_UPSERT, params)
     count = len(params)
@@ -192,7 +196,8 @@ def _reconcile_satispay(conn, df_f: pd.DataFrame, tol: float) -> int:
         stato   = _calcola_stato(teorico, reale, tol)
         if stato:
             diff = round(teorico - reale, 2)
-            params.append((int(row["codice_pv"]), row["data"], "satispay", teorico, reale, diff, stato))
+            params.append((int(row["codice_pv"]), row["data"], "satispay", teorico, reale, diff, stato, "nessuno"))
+
 
     conn.executemany(_SQL_UPSERT, params)
     count = len(params)
@@ -226,7 +231,8 @@ def _reconcile_buoni(conn, df_f: pd.DataFrame, tol: float) -> int:
         stato   = _calcola_stato(teorico, reale, tol)
         if stato:
             diff = round(teorico - reale, 2)
-            params.append((int(row["codice_pv"]), row["data"], "buoni", teorico, reale, diff, stato))
+            params.append((int(row["codice_pv"]), row["data"], "buoni", teorico, reale, diff, stato, "nessuno"))
+
     
     conn.executemany(_SQL_UPSERT, params)
     count = len(params)
@@ -260,7 +266,8 @@ def _reconcile_petrolifere(conn, df_f: pd.DataFrame, tol: float) -> int:
         stato   = _calcola_stato(teorico, reale, tol)
         if stato:
             diff = round(teorico - reale, 2)
-            params.append((int(row["codice_pv"]), row["data"], "carte_petrolifere", teorico, reale, diff, stato))
+            params.append((int(row["codice_pv"]), row["data"], "carte_petrolifere", teorico, reale, diff, stato, "nessuno"))
+
     
     conn.executemany(_SQL_UPSERT, params)
     count = len(params)
