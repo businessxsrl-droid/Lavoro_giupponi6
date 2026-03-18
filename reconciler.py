@@ -354,6 +354,7 @@ def _reconcile_contanti_matching(conn, cfg: dict):
     for _, r in df_as400.iterrows():
         as400_data[(int(r["codice_pv"]), r["data"])] = float(r["importo"])
 
+
     pvs = sorted(list(set(df_fort["codice_pv"].unique()) | set(df_as400["codice_pv"].unique())))
     all_dates = sorted(list(set(df_fort["data"].unique()) | set(df_as400["data"].unique())))
 
@@ -363,29 +364,53 @@ def _reconcile_contanti_matching(conn, cfg: dict):
         pv_int = int(pv)
         scarto_precedente = 0.0
         
-        for d_str in all_dates:
+        # Facciamo una copia locale dei versamenti perché li "consumeremo" andando in avanti (Look-Ahead FIFO)
+        local_r = {d: as400_data.get((pv_int, d), 0.0) for d in all_dates}
+        
+        for i, d_str in enumerate(all_dates):
             t = fort_data.get((pv_int, d_str), 0.0)
-            v = as400_data.get((pv_int, d_str), 0.0)
+            v = local_r[d_str]
             
+            # Saltiamo i giorni dove non succede nulla per questo PV se lo scarto è quasi zero
             if t == 0 and v == 0 and abs(scarto_precedente) < 0.01:
                 continue
                 
+            # Calcolo differenza inziale = (Teorico + Scarto Precedente) - Versato del giorno
             differenza_giorno = round(t + scarto_precedente - v, 2)
-            tipo_match = "bilancio_continuo"
+            versato_mostrato = v
+            local_r[d_str] = 0.0 # Consumato
             
+            # Look-Ahead: Se manca contante (Diff > 0), peschiamo dai giorni successivi
+            j = i + 1
+            while differenza_giorno > tolleranza and j < len(all_dates):
+                next_date = all_dates[j]
+                next_v = local_r[next_date]
+                if next_v > 0:
+                    versato_mostrato = round(versato_mostrato + next_v, 2)
+                    differenza_giorno = round(differenza_giorno - next_v, 2)
+                    local_r[next_date] = 0.0 # Soldi del futuro consumati oggi!
+                j += 1
+                
+            tipo_match = "look_ahead_fifo"
+            
+            # Determiniamo lo stato
             if abs(differenza_giorno) <= tolleranza:
                 stato = ST_QUADRATO
                 scarto_precedente = 0.0
             else:
-                if abs(differenza_giorno) > _ANOMALIA_GRAVE_THRESHOLD:
+                if differenza_giorno > _ANOMALIA_GRAVE_THRESHOLD:
                     stato = ST_ANOMALIA_GRAVE
-                else:
+                elif differenza_giorno > 0:
                     stato = ST_ANOMALIA_LIEVE
+                else: 
+                    # Negativo (Surplus): Trasferiamo tutto lo scarto al giorno dopo ed è quadrato!
+                    stato = ST_QUADRATO 
                 scarto_precedente = differenza_giorno
             
-            results.append((pv_int, d_str, t, v, differenza_giorno, stato, tipo_match))
+            results.append((pv_int, d_str, t, versato_mostrato, differenza_giorno, stato, tipo_match))
 
     if results:
+
         conn.executemany('''
             INSERT INTO contanti_matching
                 (codice_pv, data, contanti_teorico, contanti_versato, differenza, stato, tipo_match)
