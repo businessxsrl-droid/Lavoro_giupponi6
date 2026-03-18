@@ -19,14 +19,16 @@ _ANOMALIA_GRAVE_THRESHOLD = 50.0   # EUR oltre il quale è grave
 
 _SQL_UPSERT = '''
     INSERT INTO riconciliazione_risultati
-        (codice_pv, data, categoria, valore_teorico, valore_reale, differenza, stato, tipo_match)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        (codice_pv, data, categoria, valore_teorico, valore_reale, differenza, stato, tipo_match, note)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(codice_pv, data, categoria) DO UPDATE SET
         valore_teorico = excluded.valore_teorico,
         valore_reale   = excluded.valore_reale,
         differenza     = excluded.differenza,
         stato          = excluded.stato,
-        tipo_match     = excluded.tipo_match
+        tipo_match     = excluded.tipo_match,
+        note           = COALESCE(riconciliazione_risultati.note, excluded.note)
+
 
 '''
 
@@ -47,14 +49,16 @@ def _calcola_stato(teorico: float, reale: float, tolleranza: float) -> str | Non
 
 
 def _inserisci_risultato(conn, pv: int, data: str, cat: str,
-                         teorico: float, reale: float, tolleranza: float) -> int:
+                         teorico: float, reale: float, tolleranza: float, 
+                         tipo_match: str = "nessuno", note: str = "") -> int:
     """Calcola stato e inserisce/aggiorna un record. Ritorna 1 se inserito, 0 se saltato."""
     stato = _calcola_stato(teorico, reale, tolleranza)
     if stato is None:
         return 0
     diff: float = round(teorico - reale, 2)  # type: ignore[call-overload]
-    conn.execute(_SQL_UPSERT, (pv, data, cat, teorico, reale, diff, stato))
+    conn.execute(_SQL_UPSERT, (pv, data, cat, teorico, reale, diff, stato, tipo_match, note))
     return 1
+
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -99,7 +103,7 @@ def _reconcile_contanti(conn, df_f: pd.DataFrame, tol: float) -> int:
     nella tabella generale riconciliazione_risultati.
     """
     rows = conn.execute('''
-        SELECT codice_pv, data, contanti_teorico, contanti_versato, differenza, stato, tipo_match
+        SELECT codice_pv, data, contanti_teorico, contanti_versato, differenza, stato, tipo_match, note
         FROM contanti_matching
     ''').fetchall()
 
@@ -113,8 +117,10 @@ def _reconcile_contanti(conn, df_f: pd.DataFrame, tol: float) -> int:
             float(r["contanti_versato"]), 
             float(r["differenza"]), 
             r["stato"],
-            r["tipo_match"]
+            r["tipo_match"],
+            r["note"]
         ))
+
 
     
     if params:
@@ -161,7 +167,8 @@ def _reconcile_carte_bancarie(conn, df_f: pd.DataFrame, tol: float) -> int:
         stato   = _calcola_stato(teorico, reale, tol)
         if stato:
             diff = round(teorico - reale, 2)
-            params.append((int(row["codice_pv"]), row["data"], "carte_bancarie", teorico, reale, diff, stato, "nessuno"))
+            params.append((int(row["codice_pv"]), row["data"], "carte_bancarie", teorico, reale, diff, stato, "nessuno", ""))
+
 
     
     conn.executemany(_SQL_UPSERT, params)
@@ -196,7 +203,8 @@ def _reconcile_satispay(conn, df_f: pd.DataFrame, tol: float) -> int:
         stato   = _calcola_stato(teorico, reale, tol)
         if stato:
             diff = round(teorico - reale, 2)
-            params.append((int(row["codice_pv"]), row["data"], "satispay", teorico, reale, diff, stato, "nessuno"))
+            params.append((int(row["codice_pv"]), row["data"], "satispay", teorico, reale, diff, stato, "nessuno", ""))
+
 
 
     conn.executemany(_SQL_UPSERT, params)
@@ -231,7 +239,8 @@ def _reconcile_buoni(conn, df_f: pd.DataFrame, tol: float) -> int:
         stato   = _calcola_stato(teorico, reale, tol)
         if stato:
             diff = round(teorico - reale, 2)
-            params.append((int(row["codice_pv"]), row["data"], "buoni", teorico, reale, diff, stato, "nessuno"))
+            params.append((int(row["codice_pv"]), row["data"], "buoni", teorico, reale, diff, stato, "nessuno", ""))
+
 
     
     conn.executemany(_SQL_UPSERT, params)
@@ -266,7 +275,8 @@ def _reconcile_petrolifere(conn, df_f: pd.DataFrame, tol: float) -> int:
         stato   = _calcola_stato(teorico, reale, tol)
         if stato:
             diff = round(teorico - reale, 2)
-            params.append((int(row["codice_pv"]), row["data"], "carte_petrolifere", teorico, reale, diff, stato, "nessuno"))
+            params.append((int(row["codice_pv"]), row["data"], "carte_petrolifere", teorico, reale, diff, stato, "nessuno", ""))
+
 
     
     conn.executemany(_SQL_UPSERT, params)
@@ -389,6 +399,7 @@ def _reconcile_contanti_matching(conn, cfg: dict):
             
             # Look-Ahead: Se manca contante (Diff > 0), peschiamo dai giorni successivi
             j = i + 1
+            pescati_futuro = 0
             while differenza_giorno > tolleranza and j < len(all_dates):
                 next_date = all_dates[j]
                 next_v = local_r[next_date]
@@ -396,9 +407,20 @@ def _reconcile_contanti_matching(conn, cfg: dict):
                     versato_mostrato = round(versato_mostrato + next_v, 2)
                     differenza_giorno = round(differenza_giorno - next_v, 2)
                     local_r[next_date] = 0.0 # Soldi del futuro consumati oggi!
+                    pescati_futuro += 1
                 j += 1
                 
             tipo_match = "look_ahead_fifo"
+            
+            # Generazione Note Automatica
+            note_list = []
+            if scarto_precedente > 0:
+                note_list.append(f"Include mancanza gg precedenti (€{scarto_precedente:.2f})")
+            elif scarto_precedente < -0.01:
+                note_list.append(f"Coperto da eccedenza gg precedenti (€{abs(scarto_precedente):.2f})")
+            
+            if pescati_futuro > 0:
+                note_list.append(f"Recuperati versamenti da {pescati_futuro} gg successivi")
             
             # Determiniamo lo stato
             if abs(differenza_giorno) <= tolleranza:
@@ -413,16 +435,20 @@ def _reconcile_contanti_matching(conn, cfg: dict):
                     # Negativo (Surplus): Trasferiamo tutto lo scarto al giorno dopo ed è quadrato!
                     stato = ST_QUADRATO 
                 scarto_precedente = differenza_giorno
-            
-            results.append((pv_int, d_str, t, versato_mostrato, differenza_giorno, stato, tipo_match))
+                if scarto_precedente < -0.01:
+                    note_list.append(f"Eccedenza di €{abs(scarto_precedente):.2f} portata al gg successivo")
+
+            note_str = " | ".join(note_list)
+            results.append((pv_int, d_str, t, versato_mostrato, differenza_giorno, stato, tipo_match, note_str))
 
     if results:
 
         conn.executemany('''
             INSERT INTO contanti_matching
-                (codice_pv, data, contanti_teorico, contanti_versato, differenza, stato, tipo_match)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+                (codice_pv, data, contanti_teorico, contanti_versato, differenza, stato, tipo_match, note)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ''', results)
+
 
     conn.commit()
     print(f"[reconcile] contanti_matching (rolling): {len(results)} record")
