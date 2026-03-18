@@ -8,7 +8,10 @@ import hashlib
 import json
 import time
 from datetime import datetime
+import psycopg2
+from psycopg2.extras import RealDictCursor
 from supabase import create_client, Client
+
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -150,7 +153,42 @@ class SupabaseConnection:
         
         return res
 
+class PostgresConnection:
+    def __init__(self, url):
+        self._url = url
+        self._conn = psycopg2.connect(url, cursor_factory=RealDictCursor)
+        self._conn.autocommit = True
+
+    def execute(self, query, params=None):
+        # Converte ? in %s per compatibilità con psycopg2
+        q = query.replace('?', '%s')
+        cur = self._conn.cursor()
+        try:
+            cur.execute(q, params)
+            return cur
+        except Exception as e:
+            print(f"[Postgres Error] {e} | Query: {q[:200]}")
+            raise
+
+    def executemany(self, query, params_list):
+        if not params_list: return
+        q = query.replace('?', '%s')
+        cur = self._conn.cursor()
+        cur.executemany(q, params_list)
+
+    def commit(self):
+        self._conn.commit()
+
+    def rollback(self):
+        self._conn.rollback()
+
+    def close(self):
+        self._conn.close()
+
 def get_connection():
+    db_url = os.getenv("DATABASE_URL")
+    if db_url and db_url.startswith("postgres"):
+        return PostgresConnection(db_url)
     return SupabaseConnection()
 
 def init_db():
