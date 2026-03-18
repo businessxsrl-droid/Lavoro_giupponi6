@@ -17,13 +17,19 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ── Configurazione ─────────────────────────────────────────────────────────────
-URL = os.getenv("SUPABASE_URL")
-KEY = os.getenv("SUPABASE_KEY")
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+_supabase_client = None
 
-if not URL or not KEY:
-    raise ValueError("SUPABASE_URL e SUPABASE_KEY devono essere configurate nel .env")
+def get_supabase_client():
+    global _supabase_client
+    if _supabase_client is None:
+        if not SUPABASE_URL or not SUPABASE_KEY:
+            raise ValueError("SUPABASE_URL e SUPABASE_KEY devono essere configurate nel .env se non è presente DATABASE_URL")
+        from supabase import create_client
+        _supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
+    return _supabase_client
 
-supabase: Client = create_client(URL, KEY)
 
 class DualAccessRow(dict):
     """Supporta row['col'] e row[0]."""
@@ -62,8 +68,10 @@ class SupabaseConnection:
     def execute(self, query, params=None):
         sql = self._format_sql(query, params)
         try:
+            client = get_supabase_client()
             # Chiamata RPC alla funzione 'exec_sql' definita su Supabase
-            res = supabase.rpc("exec_sql", {"query": sql}).execute()
+            res = client.rpc("exec_sql", {"query": sql}).execute()
+
             # Se la query è un SELECT, res.data conterrà le righe.
             # Se è INSERT/UPDATE, res.data potrebbe essere vuoto o un conteggio.
             data = res.data if res.data else []
@@ -103,7 +111,9 @@ class SupabaseConnection:
                     combined_sql = base + ", ".join(rows_sql) + tail
                     
                     try:
-                        supabase.rpc("exec_sql", {"query": combined_sql}).execute()
+                        client = get_supabase_client()
+                        client.rpc("exec_sql", {"query": combined_sql}).execute()
+
                     except Exception as e:
                         print(f"[DB Batch Error] Chiamata fallita, provo record singolarmente: {e}")
                         for p in chunk:
