@@ -594,7 +594,7 @@ def ingest_petrolifere(file_path: str, conn=None) -> int:
             break
 
     try:
-        df = pd.read_excel(file_path, header=header_row)
+        df = _leggi_excel_multi_engine(file_path, header=header_row)
     except Exception:
         df = None
 
