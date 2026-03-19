@@ -11,6 +11,21 @@ from datetime import datetime
 from database import get_connection, init_db
 from classifier import identify_file_type, get_fortech_records, _carica_excel
 
+def _leggi_excel_multi_engine(file_path: str, **kwargs):
+    """Prova più engine pandas per leggere file .xls/.xlsx con formato ambiguo."""
+    ext = os.path.splitext(file_path)[1].lower()
+    engines = ["xlrd", "openpyxl"] if ext == ".xls" else ["openpyxl", "xlrd"]
+    for engine in [None] + engines:
+        try:
+            read_kwargs = dict(kwargs)
+            if engine:
+                read_kwargs["engine"] = engine
+            return pd.read_excel(file_path, **read_kwargs)
+        except Exception:
+            continue
+    return None
+
+
 # ── Percorsi di riferimento ────────────────────────────────────────────────────
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 # Su Render i dati ora stanno in una sottocartella locale per essere pushabili su Git
@@ -294,9 +309,13 @@ def ingest_pos(file_path: str, conn=None) -> int:
 
     # Trova la riga header cercando "Importo" e "Data e ora"
     try:
-        df_raw = pd.read_excel(file_path, header=None, nrows=15)
+        df_raw = _leggi_excel_multi_engine(file_path, header=None, nrows=15)
     except Exception as e:
         print(f"  [!] Impossibile leggere {os.path.basename(file_path)}: {e}")
+        if close:
+            conn.close()
+        return 0
+    if df_raw is None:
         if close:
             conn.close()
         return 0
@@ -309,7 +328,7 @@ def ingest_pos(file_path: str, conn=None) -> int:
 
     if header_row is not None:
         try:
-            df = pd.read_excel(file_path, header=header_row)
+            df = _leggi_excel_multi_engine(file_path, header=header_row)
         except Exception as e:
             print(f"  [!] Lettura con header fallita: {e}")
             df = None
@@ -319,6 +338,7 @@ def ingest_pos(file_path: str, conn=None) -> int:
         if close:
             conn.close()
         return 0
+
 
 
     # Identifica colonne
@@ -525,13 +545,16 @@ def ingest_petrolifere(file_path: str, conn=None) -> int:
 
     # Trova la riga header cercando 'importo' tra le prime 8 righe
     try:
-        df_raw = pd.read_excel(file_path, header=None, nrows=8)
+        df_raw = _leggi_excel_multi_engine(file_path, header=None, nrows=8)
     except Exception as e:
         print(f"  [!] Impossibile leggere {os.path.basename(file_path)}: {e}")
         if close:
             conn.close()
         return 0
-
+    if df_raw is None:
+        if close:
+            conn.close()
+        return 0
     header_row = 0
     for i, row in df_raw.iterrows():
         vals = {str(v).strip().replace("\n", "").lower() for v in row.values if pd.notna(v)}

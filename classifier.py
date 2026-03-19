@@ -66,23 +66,37 @@ _GT_CLEAN: dict[str, list[str]] = {
 # ── Caricamento robusto file Excel/HTML ──────────────────────────────────────
 
 def _carica_excel(file_path: str, **kwargs) -> pd.DataFrame | None:
-    """Carica un file Excel dando priorità al foglio 'Incassi' se presente."""
-    try:
-        with pd.ExcelFile(file_path) as xls:
-            target = 0
-            for s in xls.sheet_names:
-                if s.strip().lower() == 'incassi':
-                    target = s
-                    break
-            return pd.read_excel(xls, sheet_name=target, **kwargs)
-    except Exception:
+    """Carica un file Excel provando più engine se necessario."""
+    ext = os.path.splitext(file_path)[1].lower()
+    engines = []
+    if ext == ".xls":
+        engines = [None, "xlrd", "openpyxl"]
+    else:
+        engines = [None, "openpyxl", "xlrd"]
+
+    for engine in engines:
         try:
-            dfs = pd.read_html(file_path)
-            if dfs:
-                df = max(dfs, key=len)
-                return df.dropna(how='all').reset_index(drop=True)
+            open_kwargs = {"engine": engine} if engine else {}
+            with pd.ExcelFile(file_path, **open_kwargs) as xls:
+                target = 0
+                for s in xls.sheet_names:
+                    if s.strip().lower() == 'incassi':
+                        target = s
+                        break
+                return pd.read_excel(xls, sheet_name=target, **kwargs)
         except Exception:
-            pass
+            continue
+
+    # Ultimo tentativo: HTML (es. file .xls esportati da browser)
+    try:
+        dfs = pd.read_html(file_path)
+        if dfs:
+            df = max(dfs, key=len)
+            return df.dropna(how='all').reset_index(drop=True)
+    except Exception:
+        pass
+
+    print(f"  [!] Impossibile leggere: {os.path.basename(file_path)}")
     return None
 
 
