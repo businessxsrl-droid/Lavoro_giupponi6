@@ -76,10 +76,12 @@ def _carica_excel(file_path: str, **kwargs) -> pd.DataFrame | None:
         is_html = False
 
     if is_html:
+        # Filtra i kwargs non supportati da pd.read_html (es. nrows, engine)
+        html_kwargs = {k: v for k, v in kwargs.items() if k in ('header', 'skiprows', 'encoding')}
         # File HTML — usa pd.read_html con parser multipli
         for parser in ['lxml', 'html.parser', 'html5lib']:
             try:
-                dfs = pd.read_html(file_path, flavor=parser, **kwargs)
+                dfs = pd.read_html(file_path, flavor=parser, **html_kwargs)
                 if dfs:
                     df = max(dfs, key=len)
                     return df.dropna(how='all').reset_index(drop=True)
@@ -87,6 +89,7 @@ def _carica_excel(file_path: str, **kwargs) -> pd.DataFrame | None:
                 continue
         print(f"  [!] Impossibile leggere file HTML: {os.path.basename(file_path)}")
         return None
+
 
     # File Excel standard — prova più engine
     ext = os.path.splitext(file_path)[1].lower()
