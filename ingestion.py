@@ -12,7 +12,26 @@ from database import get_connection, init_db
 from classifier import identify_file_type, get_fortech_records, _carica_excel
 
 def _leggi_excel_multi_engine(file_path: str, **kwargs):
-    """Prova più engine pandas per leggere file .xls/.xlsx con formato ambiguo."""
+    """Prova più engine pandas per leggere file .xls/.xlsx con formato ambiguo, incluso HTML fallback."""
+    try:
+        with open(file_path, 'rb') as f:
+            header_bytes = f.read(200).decode('utf-8', errors='ignore').lstrip()
+        is_html = header_bytes.lower().startswith('<html') or header_bytes.lower().startswith('<!doctype')
+    except Exception:
+        is_html = False
+
+    if is_html:
+        html_kwargs = {k: v for k, v in kwargs.items() if k in ('header', 'skiprows', 'encoding')}
+        for parser in ['lxml', 'html.parser', 'html5lib']:
+            try:
+                dfs = pd.read_html(file_path, flavor=parser, **html_kwargs)
+                if dfs:
+                    df = max(dfs, key=len)
+                    return df.dropna(how='all').reset_index(drop=True)
+            except Exception:
+                continue
+        return None
+
     ext = os.path.splitext(file_path)[1].lower()
     engines = ["xlrd", "openpyxl"] if ext == ".xls" else ["openpyxl", "xlrd"]
     for engine in [None] + engines:
@@ -23,6 +42,18 @@ def _leggi_excel_multi_engine(file_path: str, **kwargs):
             return pd.read_excel(file_path, **read_kwargs)
         except Exception:
             continue
+            
+    # Ultimo fallback
+    html_kwargs = {k: v for k, v in kwargs.items() if k in ('header', 'skiprows', 'encoding')}
+    for parser in ['lxml', 'html.parser', 'html5lib']:
+        try:
+            dfs = pd.read_html(file_path, flavor=parser, **html_kwargs)
+            if dfs:
+                df = max(dfs, key=len)
+                return df.dropna(how='all').reset_index(drop=True)
+        except Exception:
+            continue
+            
     return None
 
 
