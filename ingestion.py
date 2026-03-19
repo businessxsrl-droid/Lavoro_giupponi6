@@ -293,7 +293,13 @@ def ingest_pos(file_path: str, conn=None) -> int:
         conn = get_connection()
 
     # Trova la riga header cercando "Importo" e "Data e ora"
-    df_raw = pd.read_excel(file_path, header=None, nrows=15)
+    try:
+        df_raw = pd.read_excel(file_path, header=None, nrows=15)
+    except Exception as e:
+        print(f"  [!] Impossibile leggere {os.path.basename(file_path)}: {e}")
+        if close:
+            conn.close()
+        return 0
     header_row = None
     for i, row in df_raw.iterrows():
         vals = {str(v).strip().lower() for v in row.values if pd.notna(v)}
@@ -302,13 +308,18 @@ def ingest_pos(file_path: str, conn=None) -> int:
             break
 
     if header_row is not None:
-        df = pd.read_excel(file_path, header=header_row)
+        try:
+            df = pd.read_excel(file_path, header=header_row)
+        except Exception as e:
+            print(f"  [!] Lettura con header fallita: {e}")
+            df = None
     else:
         df = _carica_excel(file_path)
-        if df is None:
-            if close:
-                conn.close()
-            return 0
+    if df is None:
+        if close:
+            conn.close()
+        return 0
+
 
     # Identifica colonne
     col_importo = col_data = col_alias = col_circuito = None
@@ -513,7 +524,14 @@ def ingest_petrolifere(file_path: str, conn=None) -> int:
         conn = get_connection()
 
     # Trova la riga header cercando 'importo' tra le prime 8 righe
-    df_raw = pd.read_excel(file_path, header=None, nrows=8)
+    try:
+        df_raw = pd.read_excel(file_path, header=None, nrows=8)
+    except Exception as e:
+        print(f"  [!] Impossibile leggere {os.path.basename(file_path)}: {e}")
+        if close:
+            conn.close()
+        return 0
+
     header_row = 0
     for i, row in df_raw.iterrows():
         vals = {str(v).strip().replace("\n", "").lower() for v in row.values if pd.notna(v)}
