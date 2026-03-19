@@ -438,8 +438,13 @@ def _reconcile_contanti_matching(conn, cfg: dict):
                 if scarto_precedente < -0.01:
                     note_list.append(f"Eccedenza di €{abs(scarto_precedente):.2f} portata al gg successivo")
 
-            note_str = " | ".join(note_list)
-            results.append((pv_int, d_str, t, versato_mostrato, differenza_giorno, stato, tipo_match, note_str))
+            # SKIP DEI GIORNI A ZERO TEORICO
+            # Se teorico è 0, non vogliamo riconciliare la giornata nella dashboard, 
+            # ma lo scarto si è già aggiornato per il giorno dopo (riga 437)
+            if t > 0:
+                note_str = " | ".join(note_list)
+                results.append((pv_int, d_str, t, versato_mostrato, differenza_giorno, stato, tipo_match, note_str))
+
 
     if results:
 
