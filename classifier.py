@@ -66,14 +66,31 @@ _GT_CLEAN: dict[str, list[str]] = {
 # ── Caricamento robusto file Excel/HTML ──────────────────────────────────────
 
 def _carica_excel(file_path: str, **kwargs) -> pd.DataFrame | None:
-    """Carica un file Excel provando più engine se necessario."""
-    ext = os.path.splitext(file_path)[1].lower()
-    engines = []
-    if ext == ".xls":
-        engines = [None, "xlrd", "openpyxl"]
-    else:
-        engines = [None, "openpyxl", "xlrd"]
+    """Carica un file Excel provando più engine. Gestisce file HTML rinominati .xls."""
+    # Rilevamento rapido: è un file HTML camuffato da .xls?
+    try:
+        with open(file_path, 'rb') as f:
+            header_bytes = f.read(200).decode('utf-8', errors='ignore').lstrip()
+        is_html = header_bytes.lower().startswith('<html') or header_bytes.lower().startswith('<!doctype')
+    except Exception:
+        is_html = False
 
+    if is_html:
+        # File HTML — usa pd.read_html con parser multipli
+        for parser in ['lxml', 'html.parser', 'html5lib']:
+            try:
+                dfs = pd.read_html(file_path, flavor=parser, **kwargs)
+                if dfs:
+                    df = max(dfs, key=len)
+                    return df.dropna(how='all').reset_index(drop=True)
+            except Exception:
+                continue
+        print(f"  [!] Impossibile leggere file HTML: {os.path.basename(file_path)}")
+        return None
+
+    # File Excel standard — prova più engine
+    ext = os.path.splitext(file_path)[1].lower()
+    engines = [None, "xlrd", "openpyxl"] if ext == ".xls" else [None, "openpyxl", "xlrd"]
     for engine in engines:
         try:
             open_kwargs = {"engine": engine} if engine else {}
@@ -87,17 +104,19 @@ def _carica_excel(file_path: str, **kwargs) -> pd.DataFrame | None:
         except Exception:
             continue
 
-    # Ultimo tentativo: HTML (es. file .xls esportati da browser)
-    try:
-        dfs = pd.read_html(file_path)
-        if dfs:
-            df = max(dfs, key=len)
-            return df.dropna(how='all').reset_index(drop=True)
-    except Exception:
-        pass
+    # Ultimo fallback HTML (file non rilevati come HTML all'inizio)
+    for parser in ['lxml', 'html.parser', 'html5lib']:
+        try:
+            dfs = pd.read_html(file_path, flavor=parser, **kwargs)
+            if dfs:
+                df = max(dfs, key=len)
+                return df.dropna(how='all').reset_index(drop=True)
+        except Exception:
+            continue
 
     print(f"  [!] Impossibile leggere: {os.path.basename(file_path)}")
     return None
+
 
 
 # ── Identificazione tipo file ────────────────────────────────────────────────
