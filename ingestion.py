@@ -276,7 +276,7 @@ def ingest_contanti(file_path: str, conn=None) -> int:
             conn.close()
         return 0
 
-    df["_data"]    = pd.to_datetime(df[col_data], errors="coerce").dt.strftime("%Y-%m-%d")
+    df["_data"]    = pd.to_datetime(df[col_data], dayfirst=True, errors="coerce").dt.strftime("%Y-%m-%d")
     df["_importo"] = pd.to_numeric(df[col_importo], errors="coerce").fillna(0.0)
     df = df[df["_importo"] != 0.0].dropna(subset=["_data"])
 
@@ -391,7 +391,7 @@ def ingest_pos(file_path: str, conn=None) -> int:
             conn.close()
         return 0
 
-    df["_data"]    = pd.to_datetime(df[col_data], errors="coerce").dt.strftime("%Y-%m-%d")
+    df["_data"]    = pd.to_datetime(df[col_data], dayfirst=True, errors="coerce").dt.strftime("%Y-%m-%d")
     df["_importo"] = pd.to_numeric(df[col_importo], errors="coerce").fillna(0.0)
     df = df[df["_importo"] != 0.0].dropna(subset=["_data"])
 
@@ -446,7 +446,7 @@ def ingest_satispay(file_path: str, conn=None) -> int:
             conn.close()
         return 0
 
-    df["_data"]    = pd.to_datetime(df[col_data], errors="coerce").dt.strftime("%Y-%m-%d")
+    df["_data"]    = pd.to_datetime(df[col_data], dayfirst=True, errors="coerce").dt.strftime("%Y-%m-%d")
     df["_importo"] = pd.to_numeric(df[col_importo], errors="coerce").fillna(0.0)
     df = df[df["_importo"] != 0.0].dropna(subset=["_data"])
 
@@ -509,7 +509,7 @@ def ingest_buoni(file_path: str, conn=None) -> int:
         return 0
     df = _pulisci_df_buoni(df)
 
-    col_importo = col_data = col_esercente = None
+    col_importo = col_data = col_esercente = col_pv = None
     for c in df.columns:
         cl = str(c).replace(" ", "").lower()
         if cl == "importo" and not col_importo:
@@ -520,6 +520,8 @@ def ingest_buoni(file_path: str, conn=None) -> int:
             col_data = c
         elif cl == "esercente":
             col_esercente = c
+        elif "punto" in cl and "vendita" in cl:
+            col_pv = c
 
     if not col_importo or not col_data:
         print(f"  [!] Colonne mancanti Buoni in {os.path.basename(file_path)}")
@@ -527,7 +529,7 @@ def ingest_buoni(file_path: str, conn=None) -> int:
             conn.close()
         return 0
 
-    df["_data"]    = pd.to_datetime(df[col_data], errors="coerce").dt.strftime("%Y-%m-%d")
+    df["_data"]    = pd.to_datetime(df[col_data], dayfirst=True, errors="coerce").dt.strftime("%Y-%m-%d")
     df["_importo"] = pd.to_numeric(df[col_importo], errors="coerce").fillna(0.0)
     df = df[df["_importo"] != 0.0].dropna(subset=["_data"])
 
@@ -537,17 +539,26 @@ def ingest_buoni(file_path: str, conn=None) -> int:
     for _, row in df.iterrows():
         codice_pv = None
         esercente = str(row[col_esercente]).strip() if col_esercente else ""
-        for pv in pv_list:
-            if pv in esercente:
-                codice_pv = int(pv)
-                break
-        # Fallback: stripping zeri dall'esercente
-        if codice_pv is None and esercente and esercente.lstrip("0").isdigit():
-            stripped = esercente.lstrip("0")
+        pv_val    = str(row[col_pv]).strip() if col_pv else ""
+
+        # Priorità 1: Colonna "Punto vendita"
+        if pv_val:
+            val_clean = pv_val.lstrip("0")
+            if val_clean in pv_list:
+                codice_pv = int(val_clean)
+        
+        # Priorità 2: Cerca il codice dentro "Esercente"
+        if codice_pv is None and esercente:
             for pv in pv_list:
-                if stripped == pv:
+                if pv in esercente:
                     codice_pv = int(pv)
                     break
+            
+            # Fallback esercente digit
+            if codice_pv is None and esercente.lstrip("0").isdigit():
+                stripped = esercente.lstrip("0")
+                if stripped in pv_list:
+                    codice_pv = int(stripped)
 
         params.append((row["_data"], codice_pv, row["_importo"], esercente))
 
@@ -623,7 +634,7 @@ def ingest_petrolifere(file_path: str, conn=None) -> int:
             conn.close()
         return 0
 
-    df["_data"]    = pd.to_datetime(df[col_data], errors="coerce").dt.strftime("%Y-%m-%d")
+    df["_data"]    = pd.to_datetime(df[col_data], dayfirst=True, errors="coerce").dt.strftime("%Y-%m-%d")
     df["_importo"] = pd.to_numeric(df[col_importo], errors="coerce").fillna(0.0)
     df = df[df["_importo"] != 0.0].dropna(subset=["_data"])
 
