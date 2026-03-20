@@ -529,7 +529,7 @@ def ingest_buoni(file_path: str, conn=None) -> int:
             conn.close()
         return 0
 
-    df["_data"]    = pd.to_datetime(df[col_data], dayfirst=True, errors="coerce").dt.strftime("%Y-%m-%d")
+    df["_data"]    = pd.to_datetime(df[col_data], errors="coerce").dt.strftime("%Y-%m-%d")
     df["_importo"] = pd.to_numeric(df[col_importo], errors="coerce").fillna(0.0)
     df = df[df["_importo"] != 0.0].dropna(subset=["_data"])
 
@@ -541,9 +541,9 @@ def ingest_buoni(file_path: str, conn=None) -> int:
         esercente = str(row[col_esercente]).strip() if col_esercente else ""
         pv_val    = str(row[col_pv]).strip() if col_pv else ""
 
-        # Priorità 1: Colonna "Punto vendita"
+        # Priorità 1: Colonna "Punto vendita" — legge gli ultimi 5 cifre (es. 0000046273 → 46273)
         if pv_val:
-            val_clean = pv_val.lstrip("0")
+            val_clean = pv_val.strip()[-5:]
             if val_clean in pv_list:
                 codice_pv = int(val_clean)
         

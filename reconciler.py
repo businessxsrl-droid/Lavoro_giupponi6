@@ -218,7 +218,10 @@ def _reconcile_satispay(conn, df_f: pd.DataFrame, tol: float) -> int:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _reconcile_buoni(conn, df_f: pd.DataFrame, tol: float) -> int:
-    """Riconcilia i buoni/voucher (iP Portal) vs Fortech."""
+    """Riconcilia i buoni/voucher (iP Portal) vs Fortech.
+    Teorico = totale_buoni (= BUONI + CARTAPETROLIFERA dal Fortech).
+    Reale   = somma Importo dal file iPortal, raggruppato per data e codice PV (ultimi 5 cifre).
+    """
     cols = ["codice_pv", "data", "reale"]
     df_reale = _to_df(conn,
         "SELECT codice_pv, data, SUM(importo) AS reale "

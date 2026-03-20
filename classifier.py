@@ -186,7 +186,7 @@ _FORTECH_MAPPING = {
     "pos":          ["BANCOMAT GESTORE", "CARTA CREDITO GESTORE", "AMEX",
                      "CARTA CREDITO GENERICA", "PAGOBANCOMAT", "TBS"],
     "petrolifere":  ["DKV", "UTA", "CARTAMAXIMA"],
-    "buoni":        ["CARTAPETROLIFERA", "BUONI"],
+    "buoni":        ["BUONI", "CARTAPETROLIFERA"],
     "satispay":     ["PAGAMENTIINNOVATIVI"],
     "contanti":     ["CONTANTI"],
 }
