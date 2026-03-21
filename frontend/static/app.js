@@ -190,16 +190,12 @@ async function identifyFileRemote(file, badgeId) {
         const formData = new FormData();
         formData.append('file', file);
 
-        const token = localStorage.getItem("access_token");
-        const resp = await fetch('/api/classify', {
+        const data = await apiFetch('/api/classify', {
             method: 'POST',
-            headers: { 'Authorization': `Bearer ${token}` },
             body: formData
         });
 
-        if (!resp.ok) throw new Error("Errore classificazione");
-
-        const data = await resp.json();
+        if (!data) throw new Error("Errore classificazione");
         
         // Mappa le categorie del backend ai badge del frontend
         const categoryMap = {
@@ -395,9 +391,10 @@ async function loadChartData() {
                     callbacks: {
                         label: ctx => {
                             const v = ctx.parsed;
-                            const tot = ctx.dataset.data.reduce((a, b) => a + b, 0);
-                            const pct = tot ? ((v / tot) * 100).toFixed(1) : 0;
-                            return ` € ${v.toLocaleString('it-IT', { minimumFractionDigits: 2 })}  (${pct}%)`;
+                            const tot = ctx.dataset.data.reduce((a, b) => (parseFloat(a) || 0) + (parseFloat(b) || 0), 0);
+                            const val = parseFloat(v) || 0;
+                            const pct = (tot > 0) ? ((val / tot) * 100).toFixed(1) : 0;
+                            return ` € ${val.toLocaleString('it-IT', { minimumFractionDigits: 2 })}  (${pct}%)`;
                         }
                     }
                 }
@@ -407,11 +404,12 @@ async function loadChartData() {
     };
 
     const buildLegend = (elId, values) => {
-        const tot = values.reduce((a, b) => a + b, 0);
+        const tot = values.reduce((a, b) => (parseFloat(a) || 0) + (parseFloat(b) || 0), 0);
         document.getElementById(elId).innerHTML = data.map((r, i) => {
             const lbl = (CATEGORY_LABELS[r.categoria]?.label ?? r.categoria);
-            const pct = tot ? ((values[i] / tot) * 100).toFixed(1) : 0;
-            const fmt = values[i].toLocaleString('it-IT', { minimumFractionDigits: 2 });
+            const val = parseFloat(values[i]) || 0;
+            const pct = (tot > 0) ? ((val / tot) * 100).toFixed(1) : 0;
+            const fmt = val.toLocaleString('it-IT', { minimumFractionDigits: 2 });
             return `<div class="chart-legend-item">
                 <span class="chart-legend-dot" style="background:${colors[i]}"></span>
                 <span class="chart-legend-label">${lbl}</span>
@@ -676,12 +674,8 @@ async function salvaModificheRic(id) {
     }
 
     try {
-        const response = await fetch('/api/riconciliazioni/edit', {
+        const result = await apiFetch('/api/riconciliazioni/edit', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`
-            },
             body: JSON.stringify({
                 id: id,
                 valore_reale: newValoreReale,
@@ -689,16 +683,8 @@ async function salvaModificheRic(id) {
             })
         });
 
-        const contentType = response.headers.get("content-type");
-        let result = null;
-        let isJson = false;
-
-        if (contentType && contentType.includes("application/json")) {
-            result = await response.json();
-            isJson = true;
-        }
-
-        if (response.ok) {
+        if (result) {
+            // Aggiorna UI inline per un feedback istantaneo
             // Aggiorna UI inline per un feedback istantaneo
             document.getElementById(`reale-txt-${id}`).textContent = renderMoney(newValoreReale);
             document.getElementById(`note-txt-${id}`).textContent = newNote;
@@ -1078,10 +1064,8 @@ async function openAndamento(id, nome) {
     document.body.style.overflow = 'hidden';
 
     try {
-        const resp = await fetch(`/api/impianti/${id}/andamento`);
-        const data = await resp.json();
-
-        if (!resp.ok) throw new Error(data.error || 'Errore');
+        const data = await apiFetch(`/api/impianti/${id}/andamento`);
+        if (!data) throw new Error('Impossibile caricare i dati dell\'impianto');
 
         const imp = data.impianto;
         subtitle.textContent = `PV: ${imp.codice_pv || '—'} · ${imp.tipo || 'PRESIDIATO'} · ${data.totale_giorni} giornate analizzate`;
@@ -1215,11 +1199,10 @@ async function generateAIReport() {
     container.style.display = 'none';
 
     try {
-        const resp = await fetch('/api/ai-report', { method: 'POST' });
-        const data = await resp.json();
+        const data = await apiFetch('/api/ai-report', { method: 'POST' });
 
-        if (!resp.ok) {
-            throw new Error(data.error || 'Errore API');
+        if (!data) {
+            throw new Error('Errore API o timeout');
         }
 
         // Render markdown report
@@ -1244,9 +1227,8 @@ async function generateAIReport() {
 
 async function loadConfig() {
     try {
-        const res = await fetch('/api/settings/config');
-        if (res.ok) {
-            const data = await res.json();
+        const data = await apiFetch('/api/settings/config');
+        if (data) {
             document.getElementById('cfg_contanti').value = data.tolleranza_contanti_arrotondamento || 2.00;
             document.getElementById('cfg_carte').value = data.tolleranza_carte_fisiologica || 1.00;
             document.getElementById('cfg_satispay').value = data.tolleranza_satispay || 0.01;
@@ -1274,12 +1256,12 @@ async function updateConfig(e) {
     };
 
     try {
-        const res = await fetch('/api/settings/config', {
+        const res = await apiFetch('/api/settings/config', {
             method: 'POST',
             body: JSON.stringify(payload)
         });
 
-        if (res.ok) {
+        if (res) {
             status.textContent = '✔ Tolleranze salvate con successo!';
             status.style.color = 'var(--status-ok)';
             setTimeout(() => {
@@ -1306,13 +1288,12 @@ async function updatePassword(e) {
     status.style.color = 'var(--text-secondary)';
 
     try {
-        const res = await fetch('/api/settings/password', {
+        const data = await apiFetch('/api/settings/password', {
             method: 'POST',
             body: JSON.stringify({ old_password: old_pw, new_password: new_pw })
         });
-        const data = await res.json();
 
-        if (res.ok) {
+        if (data && data.ok) {
             status.textContent = '✔ Password aggiornata. Effettua il login.';
             status.style.color = 'var(--status-ok)';
             document.getElementById('formPassword').reset();
