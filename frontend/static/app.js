@@ -324,25 +324,25 @@ function logLine(container, msg) {
 // ═══════════════════════════════════════════════════════════════
 
 async function apiFetch(endpoint, options = {}) {
-    try {
-        // Prevent aggressive browser caching for all our API endpoints
-        const defaultOptions = { cache: 'no-store', ...options };
-        let url = endpoint;
+    // Prevent aggressive browser caching for all our API endpoints
+    const defaultOptions = { cache: 'no-store', ...options };
+    let url = endpoint;
 
-        // Manual cache-busting query parameter solo per GET
-        if (!options.method || options.method.toUpperCase() === 'GET') {
-            url = endpoint.includes('?')
-                ? `${endpoint}&_t=${Date.now()}`
-                : `${endpoint}?_t=${Date.now()}`;
-        }
-
-        const resp = await fetch(url, defaultOptions);
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        return await resp.json();
-    } catch (err) {
-        console.error(`API error (${endpoint}):`, err);
-        return null;
+    // Manual cache-busting query parameter solo per GET
+    if (!options.method || options.method.toUpperCase() === 'GET') {
+        url = endpoint.includes('?')
+            ? `${endpoint}&_t=${Date.now()}`
+            : `${endpoint}?_t=${Date.now()}`;
     }
+
+    const resp = await fetch(url, defaultOptions);
+    if (!resp.ok) {
+        // Prova a leggere il JSON di errore dal server
+        let errData = {};
+        try { errData = await resp.json(); } catch(e) {}
+        throw new Error(errData.error || errData.msg || `HTTP ${resp.status}`);
+    }
+    return await resp.json();
 }
 
 // ── Chart Incassi ──
@@ -684,7 +684,6 @@ async function salvaModificheRic(id) {
         });
 
         if (result) {
-            // Aggiorna UI inline per un feedback istantaneo
             // Aggiorna UI inline per un feedback istantaneo
             document.getElementById(`reale-txt-${id}`).textContent = renderMoney(newValoreReale);
             document.getElementById(`note-txt-${id}`).textContent = newNote;
@@ -1065,8 +1064,6 @@ async function openAndamento(id, nome) {
 
     try {
         const data = await apiFetch(`/api/impianti/${id}/andamento`);
-        if (!data) throw new Error('Impossibile caricare i dati dell\'impianto');
-
         const imp = data.impianto;
         subtitle.textContent = `PV: ${imp.codice_pv || '—'} · ${imp.tipo || 'PRESIDIATO'} · ${data.totale_giorni} giornate analizzate`;
 
