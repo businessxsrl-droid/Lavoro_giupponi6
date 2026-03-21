@@ -609,13 +609,13 @@ def get_andamento(imp_id):
         if d not in giorni_dict:
             giorni_dict[d] = {"data": d, "categorie": {}, "totale_diff": 0.0, "stato_peggiore": "QUADRATO"}
         giorni_dict[d]["categorie"][r["categoria"]] = {
-            "teorico":    r["valore_teorico"],
-            "reale":      r["valore_reale"],
-            "differenza": r["differenza"],
+            "teorico":    float(r["valore_teorico"] or 0),
+            "reale":      float(r["valore_reale"] or 0),
+            "differenza": float(r["differenza"] or 0),
             "stato":      r["stato"],
         }
         giorni_dict[d]["totale_diff"] = round(
-            giorni_dict[d]["totale_diff"] + (r["differenza"] or 0), 2)
+            giorni_dict[d]["totale_diff"] + float(r["differenza"] or 0), 2)
         if _priority.get(r["stato"], 0) > _priority.get(giorni_dict[d]["stato_peggiore"], 0):
             giorni_dict[d]["stato_peggiore"] = r["stato"]
 
