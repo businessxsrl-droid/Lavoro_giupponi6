@@ -418,8 +418,12 @@ def export_excel():
     query += " ORDER BY r.data DESC, r.categoria"
 
     conn = get_connection()
-    df   = pd.read_sql_query(query, conn, params=params)
+    rows = conn.execute(query, params).fetchall()
     conn.close()
+
+    cols = ["data", "impianto", "categoria", "valore_teorico", "valore_reale",
+            "differenza", "stato", "note", "tipo_match"]
+    df = pd.DataFrame([dict(r) for r in rows], columns=cols) if rows else pd.DataFrame(columns=cols)
 
     df.rename(columns={
         "data": "Data", "impianto": "Impianto", "categoria": "Categoria",
