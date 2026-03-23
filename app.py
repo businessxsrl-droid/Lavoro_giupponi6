@@ -425,6 +425,7 @@ def export_excel():
         "data": "Data", "impianto": "Impianto", "categoria": "Categoria",
         "valore_teorico": "Fortech (€)", "valore_reale": "Reale (€)",
         "differenza": "Diff (€)", "stato": "Stato", "note": "Note",
+        "tipo_match": "Tipo Match",
     }, inplace=True)
 
     buf = io.BytesIO()

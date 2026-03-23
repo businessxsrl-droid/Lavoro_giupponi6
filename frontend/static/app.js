@@ -726,27 +726,26 @@ function esportaExcel() {
     if (pv) params.push(`pv=${pv}`);
     if (params.length > 0) url += '?' + params.join('&');
 
-    fetch(url, {
-        headers: { 'Authorization': `Bearer ${token}` }
-    })
+    fetch(url, { cache: 'no-store' })
         .then(response => {
-            if (!response.ok) throw new Error("Errore generazione Excel");
+            if (!response.ok) throw new Error(`Errore generazione Excel (HTTP ${response.status})`);
             return response.blob();
         })
         .then(blob => {
-            const url = window.URL.createObjectURL(blob);
+            const blobUrl = window.URL.createObjectURL(blob);
             const aElement = document.createElement('a');
             aElement.style.display = 'none';
-            aElement.href = url;
+            aElement.href = blobUrl;
             const filename = `Riconciliazioni_${new Date().toISOString().split('T')[0]}.xlsx`;
             aElement.download = filename;
             document.body.appendChild(aElement);
             aElement.click();
-            window.URL.revokeObjectURL(url);
+            document.body.removeChild(aElement);
+            setTimeout(() => window.URL.revokeObjectURL(blobUrl), 1000);
         })
         .catch(err => {
             console.error(err);
-            showToast("Impossibile esportare in Excel", "error");
+            showToast("Impossibile esportare in Excel: " + err.message, "error");
         });
 }
 
