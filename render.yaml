@@ -1,3 +1,9 @@
+databases:
+  - name: riconciliatore-db
+    databaseName: riconciliatore
+    user: riconciliatore_user
+    plan: free
+
 services:
   - type: web
     name: riconciliatore-giupponi
@@ -7,11 +13,9 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0
-      - key: SUPABASE_URL
-        sync: false
-      - key: SUPABASE_KEY
-        sync: false
       - key: DATABASE_URL
-        sync: false
+        fromDatabase:
+          name: riconciliatore-db
+          property: connectionString
       - key: JWT_SECRET
         generateValue: true
