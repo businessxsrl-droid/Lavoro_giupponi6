@@ -598,14 +598,14 @@ async function loadRiconciliazioni() {
                                 <tr id="row-ric-${r.id}">
                                     <td>${r.data || '—'}</td>
                                     <td style="font-weight: 500;">${r.impianto || '—'}</td>
-                                    <td style="text-align: right;">${renderMoney(r.valore_fortech)}</td>
-                                    
-                                    <td style="text-align: right;">
+                                    <td style="text-align: right;" data-val="${r.valore_fortech ?? 0}">${renderMoney(r.valore_fortech)}</td>
+
+                                    <td style="text-align: right;" data-val="${r.valore_reale ?? 0}">
                                         <span class="val-reale-text" id="reale-txt-${r.id}">${renderMoney(r.valore_reale)}</span>
                                         <input type="number" step="0.01" class="edit-input edit-reale" id="reale-inp-${r.id}" value="${r.valore_reale !== null ? r.valore_reale : ''}" style="display:none; width:80px; text-align: right;">
                                     </td>
-                                    
-                                    <td style="text-align: right; font-weight: bold;" id="diff-cell-${r.id}">${renderDiff(r.differenza)}</td>
+
+                                    <td style="text-align: right; font-weight: bold;" id="diff-cell-${r.id}" data-val="${r.differenza ?? 0}">${renderDiff(r.differenza)}</td>
                                     <td id="stato-cell-${r.id}" style="white-space: nowrap;">
                                         ${renderStatus(r.stato)}
                                         ${r.tipo_match && r.tipo_match !== 'nessuno' ? `<span style="margin-left:5px; cursor:help;" title="${TIPO_MATCH_LABELS[r.tipo_match]?.label || r.tipo_match}">${TIPO_MATCH_LABELS[r.tipo_match]?.icon || ''}</span>` : ''}
@@ -633,6 +633,38 @@ async function loadRiconciliazioni() {
     }
 
     container.innerHTML = html;
+    addDataBars(container);
+}
+
+function addDataBars(container) {
+    // Indici colonne: 2=Fortech, 3=Reale, 4=Diff
+    const COL_COLORS = ['#3fb950', '#58a6ff', null]; // null = colore dinamico per diff
+
+    container.querySelectorAll('.category-section').forEach(section => {
+        const rows = [...section.querySelectorAll('tbody tr')];
+        if (!rows.length) return;
+
+        // Calcola massimo assoluto per colonna all'interno della categoria
+        const maxVals = [2, 3, 4].map(ci =>
+            Math.max(...rows.map(r => Math.abs(parseFloat(r.querySelectorAll('td')[ci]?.dataset.val || 0))), 0)
+        );
+
+        rows.forEach(row => {
+            const cells = row.querySelectorAll('td');
+            [2, 3, 4].forEach((ci, i) => {
+                const cell = cells[ci];
+                if (!cell) return;
+                const raw = parseFloat(cell.dataset.val || 0);
+                const pct = maxVals[i] > 0 ? (Math.abs(raw) / maxVals[i]) * 100 : 0;
+                // Per la colonna diff: verde se >=0, rosso se <0
+                const color = COL_COLORS[i] ?? (raw >= 0 ? '#3fb950' : '#f85149');
+                const bar = document.createElement('div');
+                bar.className = 'data-bar-wrap';
+                bar.innerHTML = `<div class="data-bar-fill" style="width:${pct.toFixed(1)}%; background:${color};"></div>`;
+                cell.appendChild(bar);
+            });
+        });
+    });
 }
 
 // ── Modifica inline e Esportazioni ──
