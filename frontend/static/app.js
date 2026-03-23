@@ -579,7 +579,7 @@ async function loadRiconciliazioni() {
                 </button>
             </h4>
             <div class="collapsible-wrapper" id="wrapper-${cat}">
-                <div class="table-container" style="margin-bottom: 20px;">
+                <div class="table-container" style="margin-bottom: 20px; max-height: 400px; overflow-y: auto;">
                     <table class="data-table">
                         <thead>
                             <tr>
