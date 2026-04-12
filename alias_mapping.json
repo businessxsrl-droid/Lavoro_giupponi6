@@ -91,7 +91,7 @@
       "INDIRIZZO": "Via E. Talpino, 20"
     },
     {
-      "COD. PV": 41010,
+      "COD. PV": 49788,
       "COMUNE": "TALEGGIO",
       "INDIRIZZO": "Strada Provinciale 25"
     },
@@ -104,6 +104,11 @@
       "COD. PV": 42840,
       "COMUNE": "ROVETTA",
       "INDIRIZZO": "Via A. Fantoni, 53"
+    },
+    {
+      "COD. PV": 45818,
+      "COMUNE": "MILANO",
+      "INDIRIZZO": "Viale Famagosta 15"
     }
   ]
 }

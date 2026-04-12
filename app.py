@@ -179,8 +179,8 @@ def upload():
 
     # Conta giornate elaborate
     conn = get_connection()
-    days = conn.execute(
-        "SELECT COUNT(DISTINCT data) FROM transazioni_fortech").fetchone()[0]
+    days = (conn.execute(
+        "SELECT COUNT(DISTINCT data) FROM transazioni_fortech").fetchone() or [0])[0]
     conn.close()
 
     return jsonify({
@@ -199,23 +199,20 @@ def upload():
 @jwt_required()
 def get_stats():
     conn = get_connection()
-    c    = conn.cursor()
 
-    total_impianti = c.execute("SELECT COUNT(*) FROM impianti").fetchone()[0]
-    total_giornate = c.execute(
-        "SELECT COUNT(DISTINCT data) FROM transazioni_fortech").fetchone()[0]
+    def _count(q):
+        row = conn.execute(q).fetchone()
+        return row[0] if row else 0
 
-    quadrate = c.execute(
-        "SELECT COUNT(*) FROM riconciliazione_risultati "
-        "WHERE stato IN ('QUADRATO','QUADRATO_ARROT')").fetchone()[0]
-    anomalie = c.execute(
-        "SELECT COUNT(*) FROM riconciliazione_risultati "
-        "WHERE stato IN ('ANOMALIA_LIEVE','ANOMALIA_GRAVE','NON_TROVATO')").fetchone()[0]
-    anomalie_gravi = c.execute(
-        "SELECT COUNT(*) FROM riconciliazione_risultati "
-        "WHERE stato = 'ANOMALIA_GRAVE'").fetchone()[0]
-    fortech_records = c.execute(
-        "SELECT COUNT(*) FROM transazioni_fortech").fetchone()[0]
+    total_impianti  = _count("SELECT COUNT(*) as n FROM impianti")
+    total_giornate  = _count("SELECT COUNT(DISTINCT data) as n FROM transazioni_fortech")
+    quadrate        = _count("SELECT COUNT(*) as n FROM riconciliazione_risultati "
+                             "WHERE stato IN ('QUADRATO','QUADRATO_ARROT')")
+    anomalie        = _count("SELECT COUNT(*) as n FROM riconciliazione_risultati "
+                             "WHERE stato IN ('ANOMALIA_LIEVE','ANOMALIA_GRAVE','NON_TROVATO')")
+    anomalie_gravi  = _count("SELECT COUNT(*) as n FROM riconciliazione_risultati "
+                             "WHERE stato = 'ANOMALIA_GRAVE'")
+    fortech_records = _count("SELECT COUNT(*) as n FROM transazioni_fortech")
 
     conn.close()
     return jsonify({
@@ -288,10 +285,13 @@ def get_riconciliazioni():
     query  = '''
         SELECT r.id, r.codice_pv, r.data, r.categoria,
                r.valore_teorico, r.valore_reale, r.differenza, r.stato, r.note, r.tipo_match,
-               i.nome AS nome_pv
-
+               i.nome AS nome_pv,
+               COALESCE(f.prove_erogazione, 0)  AS prove_erogazione,
+               COALESCE(f.clienti_fine_mese, 0) AS clienti_fine_mese,
+               COALESCE(f.diversi, 0)            AS diversi
         FROM riconciliazione_risultati r
         LEFT JOIN impianti i ON r.codice_pv = i.codice_pv
+        LEFT JOIN transazioni_fortech f ON r.codice_pv = f.codice_pv AND r.data = f.data
         WHERE 1=1
     '''
     params = []
@@ -310,18 +310,26 @@ def get_riconciliazioni():
     rows = conn.execute(query, params).fetchall()
     conn.close()
 
-    return jsonify([{
-        "id":            r["id"],
-        "data":          r["data"],
-        "impianto":      f"{r['codice_pv']} – {r['nome_pv'] or 'N/D'}",
-        "categoria":     r["categoria"],
-        "valore_fortech": r["valore_teorico"],
-        "valore_reale":  r["valore_reale"],
-        "differenza":    r["differenza"],
-        "stato":         r["stato"],
-        "tipo_match":    r["tipo_match"] or "nessuno",
-        "note":          r["note"] or "",
+    def _safe_float(val):
+        try:
+            return float(val) if val is not None else 0.0
+        except Exception:
+            return 0.0
 
+    return jsonify([{
+        "id":               r["id"],
+        "data":             r["data"],
+        "impianto":         f"{r['codice_pv']} – {r['nome_pv'] or 'N/D'}",
+        "categoria":        r["categoria"],
+        "valore_fortech":   r["valore_teorico"],
+        "valore_reale":     r["valore_reale"],
+        "differenza":       r["differenza"],
+        "stato":            r["stato"],
+        "tipo_match":       r["tipo_match"] or "nessuno",
+        "note":             r["note"] or "",
+        "prove_erogazione": _safe_float(r.get("prove_erogazione")),
+        "clienti_fine_mese": _safe_float(r.get("clienti_fine_mese")),
+        "diversi":          _safe_float(r.get("diversi")),
     } for r in rows])
 
 
@@ -363,9 +371,8 @@ def edit_riconciliazione():
     cat_row   = conn.execute(
         "SELECT categoria FROM riconciliazione_risultati WHERE id = ?", (rid,)
     ).fetchone()
-    cat       = cat_row["categoria"] if cat_row else "contanti"
+    cat       = cat_row["categoria"] if cat_row else "carte_bancarie"
     tol_map   = {
-        "contanti":       float(cfg.get("tolleranza_contanti_arrotondamento", 2.0)),
         "carte_bancarie": float(cfg.get("tolleranza_carte_fisiologica",       1.0)),
         "satispay":       float(cfg.get("tolleranza_satispay",                0.01)),
         "buoni":          float(cfg.get("tolleranza_buoni",                   0.01)),
@@ -465,80 +472,6 @@ def get_chart_data():
         "tot_fortech": round(r["tot_fortech"] or 0, 2),
         "tot_reale":   round(r["tot_reale"] or 0, 2),
     } for r in rows])
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  CONTANTI BANCA (Vista Simona)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-@app.route("/api/contanti-banca", methods=["GET"])
-@jwt_required()
-def get_contanti_banca():
-    conn = get_connection()
-    rows = conn.execute('''
-        SELECT cm.id, cm.codice_pv, cm.data,
-               cm.contanti_teorico, cm.contanti_versato, cm.differenza,
-               cm.stato, cm.tipo_match, cm.risolto,
-               cm.verificato_da, cm.data_verifica, cm.note,
-               i.nome AS nome_pv
-        FROM contanti_matching cm
-        LEFT JOIN impianti i ON cm.codice_pv = i.codice_pv
-        ORDER BY cm.data DESC, cm.codice_pv
-    ''').fetchall()
-    conn.close()
-
-    return jsonify([{
-        "id":               r["id"],
-        "data":             r["data"],
-        "impianto":         f"{r['codice_pv']} – {r['nome_pv'] or 'N/D'}",
-        "contanti_teorico": r["contanti_teorico"],
-        "contanti_versato": r["contanti_versato"],
-        "differenza":       r["differenza"],
-        "stato":            r["stato"],
-        "tipo_match":       r["tipo_match"] or "nessuno",
-        "risolto":          bool(r["risolto"]),
-        "verificato_da":    r["verificato_da"] or "",
-        "data_verifica":    r["data_verifica"] or "",
-        "note":             r["note"] or "",
-    } for r in rows])
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  CONTANTI — CONFERMA / SEGNALAZIONE
-# ═══════════════════════════════════════════════════════════════════════════════
-
-@app.route("/api/contanti-conferma", methods=["POST"])
-@jwt_required()
-def contanti_conferma():
-    data   = request.get_json(force=True)
-    rid    = data.get("id")
-    azione = data.get("azione")  # "conferma" | "rifiuta"
-    nota   = data.get("nota", "")
-
-    if rid is None or azione not in ("conferma", "rifiuta"):
-        return jsonify(error="Parametri non validi"), 400
-
-    identity = get_jwt_identity()
-    now      = datetime.date.today().isoformat()
-
-    conn = get_connection()
-    if azione == "conferma":
-        conn.execute('''
-            UPDATE contanti_matching
-            SET risolto=1, verificato_da=?, data_verifica=?
-            WHERE id=?
-        ''', (identity, now, rid))
-    else:
-        conn.execute('''
-            UPDATE contanti_matching
-            SET stato='ANOMALIA_GRAVE', risolto=0,
-                verificato_da=?, data_verifica=?, note=?
-            WHERE id=?
-        ''', (identity, now, nota, rid))
-
-    conn.commit()
-    conn.close()
-    return jsonify(ok=True)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -648,116 +581,281 @@ def get_sicurezza():
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  AI REPORT (OpenRouter / GPT-4o Mini)
+#  AI REPORT (OpenRouter — streaming SSE)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-@app.route("/api/ai-report", methods=["POST"])
+OPENROUTER_MODELS = [
+    {"id": "openai/gpt-4o-mini",                     "label": "GPT-4o Mini (veloce, economico)"},
+    {"id": "openai/gpt-4o",                          "label": "GPT-4o (più potente)"},
+    {"id": "anthropic/claude-3-haiku",               "label": "Claude 3 Haiku (veloce)"},
+    {"id": "anthropic/claude-3.5-sonnet",            "label": "Claude 3.5 Sonnet (top Anthropic)"},
+    {"id": "google/gemini-flash-1.5",                "label": "Gemini Flash 1.5 (Google)"},
+    {"id": "meta-llama/llama-3.1-8b-instruct:free",  "label": "Llama 3.1 8B (gratuito)"},
+]
+
+def _build_ai_context(conn, data_from=None, data_to=None, codice_pv=None):
+    """Costruisce il contesto completo per il prompt AI."""
+    where_anom = ["r.stato NOT IN ('QUADRATO','QUADRATO_ARROT')"]
+    where_all  = ["1=1"]
+    if data_from:
+        where_anom.append(f"r.data >= '{data_from}'")
+        where_all.append(f"r.data >= '{data_from}'")
+    if data_to:
+        where_anom.append(f"r.data <= '{data_to}'")
+        where_all.append(f"r.data <= '{data_to}'")
+    if codice_pv:
+        where_anom.append(f"r.codice_pv = {int(codice_pv)}")
+        where_all.append(f"r.codice_pv = {int(codice_pv)}")
+
+    # Anomalie ordinate per gravità
+    anomalie = conn.execute(f'''
+        SELECT r.data, i.nome AS impianto, r.categoria,
+               r.valore_teorico, r.valore_reale, r.differenza, r.stato, r.note
+        FROM riconciliazione_risultati r
+        LEFT JOIN impianti i ON r.codice_pv = i.codice_pv
+        WHERE {" AND ".join(where_anom)}
+        ORDER BY ABS(r.differenza) DESC
+        LIMIT 80
+    ''').fetchall()
+
+    if not anomalie:
+        return None
+
+    # Statistiche globali
+    stats = conn.execute(f'''
+        SELECT
+            COUNT(*) AS totale,
+            SUM(CASE WHEN stato IN ('QUADRATO','QUADRATO_ARROT') THEN 1 ELSE 0 END) AS quadrate,
+            SUM(CASE WHEN stato = 'ANOMALIA_GRAVE' THEN 1 ELSE 0 END) AS gravi,
+            SUM(CASE WHEN stato = 'ANOMALIA_LIEVE' THEN 1 ELSE 0 END) AS lievi,
+            SUM(CASE WHEN stato = 'NON_TROVATO' THEN 1 ELSE 0 END) AS non_trovate,
+            ROUND(SUM(ABS(r.differenza))::numeric, 2) AS esposizione_totale
+        FROM riconciliazione_risultati r
+        WHERE {" AND ".join(where_all)}
+    ''').fetchone()
+
+    # Anomalie per impianto (aggregato)
+    per_impianto = conn.execute(f'''
+        SELECT i.nome AS impianto,
+               COUNT(*) AS n_anomalie,
+               ROUND(SUM(ABS(r.differenza))::numeric, 2) AS esposizione,
+               MAX(ABS(r.differenza)) AS max_diff,
+               STRING_AGG(DISTINCT r.categoria, ', ') AS categorie
+        FROM riconciliazione_risultati r
+        LEFT JOIN impianti i ON r.codice_pv = i.codice_pv
+        WHERE {" AND ".join(where_anom)}
+        GROUP BY i.nome
+        ORDER BY esposizione DESC
+        LIMIT 15
+    ''').fetchall()
+
+    # Anomalie per categoria (aggregato)
+    per_categoria = conn.execute(f'''
+        SELECT r.categoria,
+               COUNT(*) AS n_anomalie,
+               ROUND(SUM(ABS(r.differenza))::numeric, 2) AS esposizione,
+               ROUND(AVG(ABS(r.differenza))::numeric, 2) AS media_diff
+        FROM riconciliazione_risultati r
+        WHERE {" AND ".join(where_anom)}
+        GROUP BY r.categoria
+        ORDER BY esposizione DESC
+    ''').fetchall()
+
+    # Assembla contesto
+    s = stats
+    out = []
+    out.append("=== STATISTICHE GLOBALI ===")
+    out.append(f"Totale riconciliazioni: {s['totale']} | Quadrate: {s['quadrate']} | "
+               f"Anomalie gravi: {s['gravi']} | Anomalie lievi: {s['lievi']} | "
+               f"Non trovate: {s['non_trovate']} | Esposizione totale: €{s['esposizione_totale']}")
+
+    out.append("\n=== ANOMALIE PER IMPIANTO (aggregate) ===")
+    out.append("Impianto | N.Anomalie | Esposizione€ | MaxDiff€ | Categorie")
+    for r in per_impianto:
+        out.append(f"{r['impianto'] or 'N/D'} | {r['n_anomalie']} | {r['esposizione']} | {r['max_diff']:.2f} | {r['categorie']}")
+
+    out.append("\n=== ANOMALIE PER CATEGORIA (aggregate) ===")
+    out.append("Categoria | N.Anomalie | Esposizione€ | MediaDiff€")
+    for r in per_categoria:
+        out.append(f"{r['categoria']} | {r['n_anomalie']} | {r['esposizione']} | {r['media_diff']}")
+
+    out.append("\n=== DETTAGLIO ANOMALIE (ordinate per gravità) ===")
+    out.append("Data | Impianto | Categoria | Fortech€ | Reale€ | Diff€ | Stato | Note")
+    for r in anomalie:
+        note = (r['note'] or '').replace('\n', ' ')
+        out.append(
+            f"{r['data']} | {r['impianto'] or 'N/D'} | {r['categoria']} | "
+            f"{float(r['valore_teorico']):.2f} | {float(r['valore_reale']):.2f} | "
+            f"{float(r['differenza']):.2f} | {r['stato']} | {note}"
+        )
+
+    return "\n".join(out)
+
+
+def _build_prompt(context):
+    return f"""Sei un controller finanziario specializzato nella riconciliazione contabile di stazioni di servizio carburante (benzinai) in Italia. Hai accesso ai dati di riconciliazione tra i valori teorici del sistema gestionale (Fortech) e i valori reali incassati tramite POS, contanti, Satispay, buoni e carte petrolifere.
+
+GLOSSARIO DEI TIPI DI ANOMALIA:
+- ANOMALIA_GRAVE: differenza > €50 tra teorico e reale — richiede intervento immediato
+- ANOMALIA_LIEVE: differenza tra €1 e €50 — da monitorare
+- NON_TROVATO: il sistema Fortech registra un incasso ma non esiste la transazione reale corrispondente
+- QUADRATO_ARROT: quadrato entro tolleranza di arrotondamento (ok)
+
+CATEGORIE DI INCASSO:
+- pos/carte_bancarie: transazioni POS (Visa, Mastercard, Bancomat)
+- satispay: pagamenti digitali Satispay
+- buoni: voucher e buoni carburante
+- petrolifere/carte_petrolifere: DKV, UTA, CartaMaxima
+- buoni_petrolifere_combined: impianti senza separazione tra buoni e carte petrolifere
+- contanti: versamenti contanti (attualmente non riconciliati automaticamente)
+
+DATI DI RICONCILIAZIONE:
+{context}
+
+---
+
+Genera un report professionale completo in italiano con le seguenti sezioni obbligatorie:
+
+## 1. Sintesi Esecutiva
+Panoramica in 3-5 righe: quante anomalie, esposizione totale, impianti più critici, trend generale.
+
+## 2. Anomalie Critiche per Impianto
+Per ogni impianto con anomalie GRAVI o NON_TROVATO, analizza:
+- Quale categoria è problematica e perché
+- Entità della discrepanza in euro
+- Se il problema è isolato (singola data) o sistematico (più date)
+- Giudizio sul rischio: ALTO / MEDIO / BASSO
+
+## 3. Analisi per Categoria di Incasso
+Per ogni categoria con anomalie significative:
+- Numero anomalie e esposizione totale
+- Possibili cause tecniche o operative (es: terminale POS non sincronizzato, file non caricato, errore di mappatura)
+- Se il problema riguarda uno o più impianti specifici
+
+## 4. Azioni Consigliate
+Lista prioritizzata di azioni concrete (usa ✅ / ⚠️ / 🔴 per priorità):
+- Chi deve fare cosa
+- Entro quando
+- Come verificare la risoluzione
+
+## 5. Impianti da Monitorare
+Lista degli impianti che richiedono attenzione nelle prossime riconciliazioni, con motivazione.
+
+Usa un linguaggio professionale ma diretto. Includi i valori in euro dove rilevante. Sii specifico sui nomi degli impianti e delle categorie."""
+
+
+@app.route("/api/ai-report/models", methods=["GET"])
 @jwt_required()
-def ai_report():
-    import urllib.request
-    import json
+def ai_report_models():
+    conn = get_connection()
+    cfg  = get_config(conn)
+    conn.close()
+    current = cfg.get("openrouter_model", "openai/gpt-4o-mini")
+    return jsonify(models=OPENROUTER_MODELS, current=current)
+
+
+@app.route("/api/ai-report/model", methods=["POST"])
+@jwt_required()
+def ai_report_set_model():
+    body  = request.get_json(force=True) or {}
+    model = body.get("model", "").strip()
+    valid_ids = {m["id"] for m in OPENROUTER_MODELS}
+    if model not in valid_ids:
+        return jsonify(error="Modello non valido"), 400
+    conn = get_connection()
+    conn.execute(
+        "INSERT INTO config (chiave, valore) VALUES ('openrouter_model', ?) "
+        "ON CONFLICT(chiave) DO UPDATE SET valore = excluded.valore", (model,)
+    )
+    conn.commit()
+    conn.close()
+    return jsonify(message="Modello salvato")
+
+
+@app.route("/api/ai-report/stream", methods=["POST"])
+@jwt_required()
+def ai_report_stream():
+    import requests as req_lib
+    from flask import stream_with_context, Response
+
+    body = request.get_json(force=True, silent=True) or {}
 
     conn = get_connection()
     cfg  = get_config(conn)
     api_key = cfg.get("openrouter_api_key", "").strip()
+    model   = body.get("model") or cfg.get("openrouter_model", "openai/gpt-4o-mini")
 
     if not api_key:
         conn.close()
         return jsonify(error="Chiave API OpenRouter non configurata. Vai in Impostazioni."), 400
 
-    # Prepara il contesto con i dati di riconciliazione
-    rows = conn.execute('''
-        SELECT r.data, i.nome, r.categoria, r.valore_teorico, r.valore_reale,
-               r.differenza, r.stato
-        FROM riconciliazione_risultati r
-        LEFT JOIN impianti i ON r.codice_pv = i.codice_pv
-        WHERE r.stato NOT IN ('QUADRATO')
-        ORDER BY ABS(r.differenza) DESC
-        LIMIT 50
-    ''').fetchall()
+    context = _build_ai_context(
+        conn,
+        data_from  = body.get("data_from"),
+        data_to    = body.get("data_to"),
+        codice_pv  = body.get("codice_pv"),
+    )
     conn.close()
 
-    if not rows:
-        return jsonify(report="Nessuna anomalia rilevata. Tutti i dati sono quadrati."), 200
+    if not context:
+        def _empty():
+            yield "data: {\"content\": \"✅ Nessuna anomalia rilevata. Tutti i valori sono quadrati.\"}\n\n"
+            yield "data: [DONE]\n\n"
+        return Response(stream_with_context(_empty()), mimetype="text/event-stream",
+                        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
-    context_lines = ["Data | Impianto | Categoria | Fortech | Reale | Diff | Stato"]
-    for r in rows:
-        context_lines.append(
-            f"{r['data']} | {r['nome'] or 'N/D'} | {r['categoria']} | "
-            f"€{r['valore_teorico']:.2f} | €{r['valore_reale']:.2f} | "
-            f"€{r['differenza']:.2f} | {r['stato']}"
-        )
-    context = "\n".join(context_lines)
+    prompt = _build_prompt(context)
 
-    prompt = (
-        "Sei un esperto di riconciliazione contabile per stazioni di servizio. "
-        "Analizza le seguenti anomalie rilevate nel sistema e fornisci:\n"
-        "1. Un riepilogo delle anomalie più critiche\n"
-        "2. Possibili cause per le discrepanze più gravi\n"
-        "3. Azioni consigliate per la risoluzione\n\n"
-        f"Dati anomalie:\n{context}"
-    )
+    def generate():
+        try:
+            resp = req_lib.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                json={
+                    "model":    model,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": 4000,
+                    "stream":   True,
+                },
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type":  "application/json",
+                    "HTTP-Referer":  "https://calor-systems.local",
+                },
+                stream=True,
+                timeout=60,
+            )
+            for line in resp.iter_lines():
+                if not line:
+                    continue
+                if isinstance(line, bytes):
+                    line = line.decode("utf-8")
+                if not line.startswith("data: "):
+                    continue
+                data_str = line[6:]
+                if data_str.strip() == "[DONE]":
+                    yield "data: [DONE]\n\n"
+                    return
+                try:
+                    chunk   = json.loads(data_str)
+                    content = chunk["choices"][0]["delta"].get("content", "")
+                    if content:
+                        yield f"data: {json.dumps({'content': content})}\n\n"
+                except Exception:
+                    pass
+        except Exception as e:
+            yield f"data: {{\"error\": \"{str(e)}\"}}\n\n"
+            yield "data: [DONE]\n\n"
 
-    payload = json.dumps({
-        "model": "openai/gpt-4o-mini",
-        "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": 1500,
-    }).encode("utf-8")
-
-    req = urllib.request.Request(
-        "https://openrouter.ai/api/v1/chat/completions",
-        data=payload,
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type":  "application/json",
-            "HTTP-Referer":  "https://calor-systems.local",
-        },
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            result = json.loads(resp.read().decode("utf-8"))
-        report_text = result["choices"][0]["message"]["content"]
-        return jsonify(report=report_text)
-    except Exception as e:
-        return jsonify(error=f"Errore API OpenRouter: {e}"), 502
+    return Response(stream_with_context(generate()), mimetype="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
-
-# ═══════════════════════════════════════════════════════════════
-#  CONTANTI — RIEPILOGO AGGREGATO PER PV
-# ═══════════════════════════════════════════════════════════════
-
-@app.route("/api/contanti-riepilogo", methods=["GET"])
+@app.route("/api/ai-report", methods=["POST"])
 @jwt_required()
-def get_contanti_riepilogo():
-    conn = get_connection()
-    # Calcola somme per PV
-    query = '''
-        SELECT 
-            i.codice_pv, 
-            i.nome,
-            (SELECT COALESCE(SUM(totale_contante), 0) FROM transazioni_fortech WHERE codice_pv = i.codice_pv) as tot_teorico,
-            (SELECT COALESCE(SUM(importo), 0) FROM transazioni_contanti WHERE codice_pv = i.codice_pv) as tot_reale
-        FROM impianti i
-        ORDER BY i.nome
-    '''
-    rows = conn.execute(query).fetchall()
-    conn.close()
+def ai_report():
+    # Endpoint legacy — redirige allo stream per retrocompatibilità
+    return ai_report_stream()
 
-    results = []
-    for r in rows:
-        teorico = r["tot_teorico"]
-        reale = r["tot_reale"]
-        diff = round(teorico - reale, 2)
-        results.append({
-            "codice_pv": r["codice_pv"],
-            "nome": r["nome"] or f"PV {r['codice_pv']}",
-            "tot_teorico": teorico,
-            "tot_reale": reale,
-            "differenza": diff
-        })
-    return jsonify(results)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -773,9 +871,7 @@ def settings_config():
         conn.close()
         # Ritorna solo le chiavi non sensibili
         safe_keys = [
-            "tolleranza_contanti_arrotondamento", "tolleranza_carte_fisiologica",
-            "tolleranza_satispay", "scarto_giorni_buoni",
-            "scarto_giorni_contanti_inf", "scarto_giorni_contanti_sup",
+            "tolleranza_carte_fisiologica", "tolleranza_satispay", "scarto_giorni_buoni",
         ]
         return jsonify({k: float(cfg[k]) if k in cfg else 0 for k in safe_keys})
 
@@ -859,8 +955,7 @@ def settings_apikey():
 @app.route("/api/settings/apikey/test", methods=["POST"])
 @jwt_required()
 def settings_apikey_test():
-    import urllib.request
-    import json
+    import requests as req_lib
 
     data    = request.get_json(force=True)
     api_key = data.get("api_key", "").strip()
@@ -874,35 +969,103 @@ def settings_apikey_test():
     if not api_key:
         return jsonify(error="Nessuna chiave API configurata"), 400
 
-    payload = json.dumps({
-        "model": "openai/gpt-4o-mini",
-        "messages": [{"role": "user", "content": "ping"}],
-        "max_tokens": 5,
-    }).encode("utf-8")
-
-    req = urllib.request.Request(
-        "https://openrouter.ai/api/v1/chat/completions",
-        data=payload,
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type":  "application/json",
-        },
-        method="POST",
-    )
     try:
-        with urllib.request.urlopen(req, timeout=10):
-            pass
-        return jsonify(message="✅ Connessione OpenRouter OK")
-    except urllib.error.HTTPError as e:
-        if e.code == 401:
+        resp = req_lib.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            json={"model": "openai/gpt-4o-mini", "messages": [{"role": "user", "content": "ping"}], "max_tokens": 5},
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            timeout=10,
+        )
+        if resp.status_code == 401:
             return jsonify(error="❌ Chiave non valida (401 Unauthorized)"), 400
-        return jsonify(error=f"❌ HTTP {e.code}: {e.reason}"), 502
+        if not resp.ok:
+            return jsonify(error=f"❌ HTTP {resp.status_code}"), 502
+        return jsonify(message="✅ Connessione OpenRouter OK")
     except Exception as e:
         return jsonify(error=f"❌ Connessione fallita: {e}"), 502
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  AVVIO
+# ═══════════════════════════════════════════════════════════════════════════════
+#  VERIFICA COMPENSAZIONI
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/verifica/anteprima", methods=["POST"])
+@jwt_required()
+def verifica_anteprima():
+    """Restituisce le coppie compensabili senza modificare il DB."""
+    from verifica import find_compensazioni
+    body       = request.get_json(force=True, silent=True) or {}
+    tolleranza = float(body.get("tolleranza", 1.0))
+    codice_pv  = body.get("codice_pv") or None
+    categoria  = body.get("categoria") or None
+
+    conn    = get_connection()
+    matches = find_compensazioni(conn, tolleranza=tolleranza, codice_pv=codice_pv, categoria=categoria)
+    conn.close()
+
+    # Statistiche riassuntive
+    esposizione_totale = sum(abs(m['diff_pos']) for m in matches)
+    return jsonify(
+        matches=matches,
+        totale_coppie=len(matches),
+        righe_compensabili=len(matches) * 2,
+        esposizione_compensata=round(esposizione_totale, 2),
+    )
+
+
+@app.route("/api/verifica/applica", methods=["POST"])
+@jwt_required()
+def verifica_applica():
+    """Applica tutte le compensazioni (o un sottoinsieme tramite id_pairs)."""
+    from verifica import applica_compensazioni
+    body       = request.get_json(force=True, silent=True) or {}
+    tolleranza = float(body.get("tolleranza", 1.0))
+    id_pairs   = body.get("id_pairs")  # lista di [id_pos, id_neg] o None
+
+    if id_pairs is not None:
+        id_pairs = [tuple(p) for p in id_pairs]
+
+    conn = get_connection()
+    updated, matches = applica_compensazioni(conn, id_pairs=id_pairs, tolleranza=tolleranza)
+    conn.close()
+
+    return jsonify(
+        message=f"{updated} righe aggiornate a QUADRATO_COMPENSATO",
+        coppie_compensate=len(matches),
+        righe_aggiornate=updated,
+    )
+
+
+@app.route("/api/verifica/reset", methods=["POST"])
+@jwt_required()
+def verifica_reset():
+    """Annulla tutte le compensazioni (ripristina ANOMALIA_GRAVE)."""
+    from verifica import reset_compensazioni
+    body      = request.get_json(force=True, silent=True) or {}
+    codice_pv = body.get("codice_pv") or None
+
+    conn = get_connection()
+    reset_compensazioni(conn, codice_pv=codice_pv)
+    conn.close()
+    return jsonify(message="Compensazioni annullate.")
+
+
+@app.route("/api/verifica/stats", methods=["GET"])
+@jwt_required()
+def verifica_stats():
+    """Statistiche sullo stato delle compensazioni."""
+    conn = get_connection()
+    rows = conn.execute("""
+        SELECT stato, COUNT(*) as n, ROUND(SUM(ABS(differenza))::numeric, 2) as esposizione
+        FROM riconciliazione_risultati
+        GROUP BY stato
+    """).fetchall()
+    conn.close()
+    return jsonify({r['stato']: {'count': r['n'], 'esposizione': float(r['esposizione'] or 0)} for r in rows})
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":

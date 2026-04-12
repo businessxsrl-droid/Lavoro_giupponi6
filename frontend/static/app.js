@@ -5,7 +5,6 @@
 // ── State ──
 let selectedFiles = [];
 const CATEGORY_LABELS = {
-    contanti: { label: '💰 Contanti', color: '#d29922' },
     carte_bancarie: { label: '💳 Carte Bancarie', color: '#3fb950' },
     carte_petrolifere: { label: '⛽ Carte Petrolifere', color: '#58a6ff' },
     satispay: { label: '📱 Satispay', color: '#8b949e' },
@@ -15,6 +14,7 @@ const CATEGORY_LABELS = {
 const STATUS_MAP = {
     QUADRATO: { label: '✅ Quadrato', css: 'status-quadrato' },
     QUADRATO_ARROT: { label: '✅ Quadrato (≈)', css: 'status-quadrato-arrot' },
+    QUADRATO_COMPENSATO: { label: '🔁 Compensato', css: 'status-quadrato-arrot' },
     ANOMALIA_LIEVE: { label: '⚠️ Anomalia lieve', css: 'status-anomalia-lieve' },
     ANOMALIA_GRAVE: { label: '🔴 Anomalia grave', css: 'status-anomalia-grave' },
     NON_TROVATO: { label: '❓ Non trovato', css: 'status-non-trovato' },
@@ -27,7 +27,7 @@ function classifyFile(name) {
     const n = name.toLowerCase();
     if (n.includes('fortech') || n.includes('file generale') || n.includes('a_file'))
         return { type: 'FORTECH', label: 'Fortech', css: 'badge-fortech' };
-    if (n.includes('as400') || n.includes('contanti') || n.includes('giallo'))
+    if (n.includes('as400') || n.includes('giallo'))
         return { type: 'AS400', label: 'AS400', css: 'badge-as400' };
     if (n.includes('numia') || n.includes('carte bancarie') || n.includes('verde'))
         return { type: 'NUMIA', label: 'Numia', css: 'badge-numia' };
@@ -61,10 +61,9 @@ function switchView(viewName) {
         dashboard: '📊 Dashboard',
         upload: '📂 Carica File Excel',
         riconciliazioni: '🔄 Riconciliazioni',
-        'contanti-riepilogo': '📈 Riepilogo Contanti',
-        'contanti-matching': '💰 Matching Contanti',
         impianti: '🏢 Impianti',
         sicurezza: '🔐 Sicurezza',
+        verifica: '✅ Verifica Compensazioni',
         'ai-report': '🤖 Report AI',
         settings: '⚙️ Impostazioni Sistema',
     };
@@ -73,11 +72,11 @@ function switchView(viewName) {
     // Load data for the view
     if (viewName === 'dashboard') loadDashboard();
     if (viewName === 'riconciliazioni') { populatePvFilter(); loadRiconciliazioni(); }
-    if (viewName === 'contanti-riepilogo') loadContantiRiepilogo();
-    if (viewName === 'contanti-matching') loadContantiBanca();
     if (viewName === 'impianti') loadImpianti();
     if (viewName === 'sicurezza') loadSicurezza();
     if (viewName === 'settings') loadConfig();
+    if (viewName === 'verifica') loadVerifica();
+    if (viewName === 'ai-report') loadAIModels();
 
     // Close mobile sidebar
     document.getElementById('sidebar').classList.remove('open');
@@ -200,7 +199,6 @@ async function identifyFileRemote(file, badgeId) {
         // Mappa le categorie del backend ai badge del frontend
         const categoryMap = {
             'FORTECH': { label: 'Fortech', css: 'badge-fortech' },
-            'contanti': { label: '💰 Contanti', css: 'badge-as400' },
             'carte_bancarie': { label: '💳 Carte Bancarie', css: 'badge-numia' },
             'carte_petrolifere': { label: '⛽ Carte Petrolifere', css: 'badge-ip-carte' },
             'buoni': { label: '🎟️ Buoni / iP', css: 'badge-ip-buoni' },
@@ -358,7 +356,6 @@ async function loadChartData() {
     document.getElementById('chartPanel').style.display = 'block';
 
     const CAT_COLORS = {
-        contanti: '#d29922',
         carte_bancarie: '#3fb950',
         carte_petrolifere: '#58a6ff',
         satispay: '#8b949e',
@@ -589,6 +586,9 @@ async function loadRiconciliazioni() {
                                 <th style="width: 120px; text-align: right;">Reale (€)</th>
                                 <th style="width: 120px; text-align: right;">Diff (€)</th>
                                 <th style="width: 130px;">Stato</th>
+                                <th style="width: 110px; text-align: right;" title="Prove di erogazione (solo visualizzazione)">Prove eron. (€)</th>
+                                <th style="width: 110px; text-align: right;" title="Clienti con fatturazione a fine mese (solo visualizzazione)">Cli. fine mese (€)</th>
+                                <th style="width: 90px; text-align: right;" title="Diversi (solo visualizzazione)">Diversi (€)</th>
                                 <th style="width: 200px;">Note</th>
                                 <th style="width: 70px; text-align: center;">Azioni</th>
                             </tr>
@@ -612,11 +612,15 @@ async function loadRiconciliazioni() {
                                     </td>
 
                                     
+                                    <td style="text-align: right; color: var(--text-secondary); font-size: 12px;">${r.prove_erogazione > 0 ? renderMoney(r.prove_erogazione) : '—'}</td>
+                                    <td style="text-align: right; color: var(--text-secondary); font-size: 12px;">${r.clienti_fine_mese > 0 ? renderMoney(r.clienti_fine_mese) : '—'}</td>
+                                    <td style="text-align: right; color: var(--text-secondary); font-size: 12px;">${r.diversi > 0 ? renderMoney(r.diversi) : '—'}</td>
+
                                     <td style="font-size: 11px; color: var(--text-secondary); line-height: 1.4;">
                                         <span class="val-note-text" id="note-txt-${r.id}">${r.note || ''}</span>
                                         <input type="text" class="edit-input edit-note" id="note-inp-${r.id}" value="${r.note || ''}" style="display:none; width:100%">
                                     </td>
-                                    
+
                                     <td style="text-align: center;">
                                         <button class="btn-action btn-edit" id="btn-edit-${r.id}" onclick="toggleEditRic(${r.id})" title="Modifica">✏️</button>
                                         <button class="btn-action btn-save" id="btn-save-${r.id}" onclick="salvaModificheRic(${r.id})" style="display:none" title="Salva">💾</button>
@@ -792,196 +796,6 @@ const TIPO_MATCH_LABELS = {
 function renderTipoMatch(tipo) {
     const t = TIPO_MATCH_LABELS[tipo] || TIPO_MATCH_LABELS[''];
     return `<span class="tipo-match-badge ${t.css}">${t.icon} ${t.label}</span>`;
-}
-
-async function loadContantiBanca() {
-    const data = await apiFetch('/api/contanti-banca');
-    const container = document.getElementById('contantiList');
-    const statsContainer = document.getElementById('contantiStats');
-
-    if (!data || data.length === 0) {
-        container.innerHTML = '<div class="empty-state">Nessun dato contanti disponibile. Carica i file Excel per generare i risultati.</div>';
-        statsContainer.innerHTML = '';
-        return;
-    }
-
-    // Summary stats
-    const daConfermare = data.filter(r => !r.risolto && r.stato !== 'IN_ATTESA').length;
-    const confermati = data.filter(r => r.risolto).length;
-    const anomalie = data.filter(r => r.stato === 'ANOMALIA_GRAVE' || r.stato === 'IN_ATTESA').length;
-    const totale = data.length;
-
-    statsContainer.innerHTML = `
-        <div class="cs-stat cs-stat-warn">
-            <div class="cs-stat-value">${daConfermare}</div>
-            <div class="cs-stat-label">Da Confermare</div>
-        </div>
-        <div class="cs-stat cs-stat-ok">
-            <div class="cs-stat-value">${confermati}</div>
-            <div class="cs-stat-label">Confermati</div>
-        </div>
-        <div class="cs-stat cs-stat-danger">
-            <div class="cs-stat-value">${anomalie}</div>
-            <div class="cs-stat-label">Anomalie</div>
-        </div>
-        <div class="cs-stat">
-            <div class="cs-stat-value">${totale}</div>
-            <div class="cs-stat-label">Totale</div>
-        </div>
-    `;
-
-    // Render cards
-    container.innerHTML = data.map((r, idx) => {
-        const statoInfo = STATUS_MAP[r.stato] || { label: r.stato, css: 'status-non-trovato' };
-        const isCumulativo = (r.tipo_match || '').startsWith('cumulativo');
-        const isConfermato = r.risolto;
-        const isAnomalia = r.stato === 'ANOMALIA_GRAVE' || r.stato === 'IN_ATTESA';
-
-        // Card border color
-        let cardClass = 'cc-card';
-        if (isConfermato) cardClass += ' cc-confermato';
-        else if (isAnomalia) cardClass += ' cc-anomalia';
-        else if (r.stato === 'QUADRATO' || r.stato === 'QUADRATO_ARROT') cardClass += ' cc-ok';
-
-        // Differenza display
-        const diff = parseFloat(r.differenza) || 0;
-        const diffCls = diff === 0 ? 'diff-zero' : diff > 0 ? 'diff-positive' : 'diff-negative';
-
-        // Build detail section for expand
-        let detailHtml = '';
-
-        // Matching breakdown
-        detailHtml += '<div class="cc-detail-section">';
-        detailHtml += '<div class="cc-detail-title">Dettaglio Calcolo</div>';
-        detailHtml += '<div class="cc-calc-grid">';
-        detailHtml += `<div class="cc-calc-row"><span class="cc-calc-label">Fortech (teorico):</span><span class="cc-calc-value">${renderMoney(r.contanti_teorico)}</span></div>`;
-        detailHtml += `<div class="cc-calc-row"><span class="cc-calc-label">AS400 (versato):</span><span class="cc-calc-value">${renderMoney(r.contanti_versato)}</span></div>`;
-        detailHtml += `<div class="cc-calc-row cc-calc-result"><span class="cc-calc-label">Differenza:</span><span class="cc-calc-value ${diffCls}">${renderDiff(r.differenza)}</span></div>`;
-        detailHtml += '</div>';
-        detailHtml += '</div>';
-
-        // Type info
-        if (isCumulativo) {
-            const nGiorni = parseInt((r.tipo_match || '').replace(/[^0-9]/g, '')) || 2;
-            const tolleranza = nGiorni * 5;
-            detailHtml += '<div class="cc-detail-section cc-detail-cumul">';
-            detailHtml += `<div class="cc-detail-title">📦 Versamento Cumulativo (${nGiorni} giorni)</div>`;
-            detailHtml += `<div class="cc-detail-info">Il gestore ha versato ${nGiorni} giornate insieme. Tolleranza applicata: <strong>&plusmn;${tolleranza} EUR</strong> (${nGiorni} &times; 5 EUR)</div>`;
-            detailHtml += '</div>';
-        }
-
-        // Notes
-        if (r.note) {
-            detailHtml += '<div class="cc-detail-section">';
-            detailHtml += `<div class="cc-detail-title">Note</div>`;
-            detailHtml += `<div class="cc-detail-info">${r.note}</div>`;
-            detailHtml += '</div>';
-        }
-
-        // Verification info
-        if (r.verificato_da) {
-            detailHtml += '<div class="cc-detail-section">';
-            detailHtml += `<div class="cc-detail-title">Verifica</div>`;
-            detailHtml += `<div class="cc-detail-info">Verificato da <strong>${r.verificato_da}</strong> il ${r.data_verifica || '—'}</div>`;
-            detailHtml += '</div>';
-        }
-
-        // Action buttons
-        let actionsHtml = '';
-        if (!isConfermato) {
-            actionsHtml = `
-                <div class="cc-actions">
-                    <button class="btn cc-btn-conferma" onclick="confermaContanti(${r.id}, 'conferma', this)" title="Conferma matching">
-                        ✅ Conferma
-                    </button>
-                    <button class="btn cc-btn-segnala" onclick="segnalaContanti(${r.id}, this)" title="Segnala anomalia">
-                        ❌ Segnala
-                    </button>
-                </div>
-            `;
-        } else {
-            actionsHtml = '<div class="cc-actions"><span class="cc-confermato-badge">✅ Confermato</span></div>';
-        }
-
-        return `
-            <div class="${cardClass}" id="cc-card-${r.id}">
-                <div class="cc-header" onclick="this.parentElement.classList.toggle('cc-expanded')">
-                    <span class="cc-date">${r.data || '—'}</span>
-                    <span class="cc-impianto">${r.impianto || '—'}</span>
-                    <span class="cc-amounts">
-                        <span class="cc-teorico">${renderMoney(r.contanti_teorico)}</span>
-                        <span class="cc-arrow">&rarr;</span>
-                        <span class="cc-versato">${renderMoney(r.contanti_versato)}</span>
-                    </span>
-                    <span class="${diffCls} cc-diff">${renderDiff(r.differenza)}</span>
-                    ${renderTipoMatch(r.tipo_match)}
-                    <span class="status-badge ${statoInfo.css}">${statoInfo.label}</span>
-                    <span class="cc-expand-icon">▼</span>
-                </div>
-                <div class="cc-body">
-                    ${detailHtml}
-                    ${actionsHtml}
-                </div>
-            </div>
-        `;
-    }).join('');
-}
-
-async function confermaContanti(id, azione, btnEl) {
-    if (btnEl) btnEl.disabled = true;
-    try {
-        const resp = await fetch('/api/contanti-conferma', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ id, azione })
-        });
-
-        const ct = resp.headers.get('content-type');
-        const data = (ct && ct.includes('application/json')) ? await resp.json() : null;
-        if (!resp.ok) throw new Error((data && data.error) || `Errore server: ${resp.status}`);
-
-        // Update card visually
-        const card = document.getElementById(`cc-card-${id}`);
-        if (card) {
-            card.classList.add('cc-confermato');
-            card.classList.remove('cc-anomalia', 'cc-ok');
-            const actions = card.querySelector('.cc-actions');
-            if (actions) actions.innerHTML = '<span class="cc-confermato-badge">✅ Confermato</span>';
-        }
-        showToast('Record confermato', 'success');
-    } catch (err) {
-        showToast('Errore: ' + err.message, 'error');
-        if (btnEl) btnEl.disabled = false;
-    }
-}
-
-async function segnalaContanti(id, btnEl) {
-    const nota = prompt('Motivo della segnalazione (opzionale):') || '';
-    if (btnEl) btnEl.disabled = true;
-    try {
-        const resp = await fetch('/api/contanti-conferma', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ id, azione: 'rifiuta', nota })
-        });
-
-        const ct = resp.headers.get('content-type');
-        const data = (ct && ct.includes('application/json')) ? await resp.json() : null;
-        if (!resp.ok) throw new Error((data && data.error) || `Errore server: ${resp.status}`);
-
-        // Update card visually
-        const card = document.getElementById(`cc-card-${id}`);
-        if (card) {
-            card.classList.remove('cc-ok');
-            card.classList.add('cc-anomalia');
-            const actions = card.querySelector('.cc-actions');
-            if (actions) actions.innerHTML = '<span class="cc-segnalato-badge">❌ Segnalato</span>';
-        }
-        showToast('Anomalia segnalata', 'success');
-    } catch (err) {
-        showToast('Errore: ' + err.message, 'error');
-        if (btnEl) btnEl.disabled = false;
-    }
 }
 
 // ── Impianti ──
@@ -1182,38 +996,270 @@ function simpleMarkdownToHtml(md) {
     return '<p>' + html + '</p>';
 }
 
+// ═══════════════════════════════════════════════════════════════
+// VERIFICA COMPENSAZIONI
+// ═══════════════════════════════════════════════════════════════
+
+let _verificaMatches = [];
+
+async function loadVerifica() {
+    // Popola filtro impianti
+    const impSel = document.getElementById('verificaImpiantoFilter');
+    if (impSel && impSel.options.length <= 1) {
+        const impianti = await apiFetch('/api/impianti');
+        if (impianti) {
+            impianti.forEach(i => {
+                const opt = document.createElement('option');
+                opt.value = i.codice_pv;
+                opt.textContent = i.nome || i.codice_pv;
+                impSel.appendChild(opt);
+            });
+        }
+    }
+    await _aggiornaVerificaStats();
+}
+
+async function _aggiornaVerificaStats() {
+    const data = await apiFetch('/api/verifica/stats');
+    if (!data) return;
+    const bar = document.getElementById('verificaStatsBar');
+    if (!bar) return;
+
+    const items = [
+        { stato: 'ANOMALIA_GRAVE',      label: 'Anomalie Gravi',   color: '#f85149' },
+        { stato: 'ANOMALIA_LIEVE',      label: 'Anomalie Lievi',   color: '#d29922' },
+        { stato: 'NON_TROVATO',         label: 'Non Trovate',      color: '#8b949e' },
+        { stato: 'QUADRATO_COMPENSATO', label: 'Compensate',       color: '#56d364' },
+        { stato: 'QUADRATO',            label: 'Quadrate',         color: '#3fb950' },
+    ];
+
+    bar.innerHTML = items.map(item => {
+        const d = data[item.stato] || { count: 0, esposizione: 0 };
+        return `<div style="background:var(--bg-card);border:1px solid var(--border-color);border-radius:8px;padding:12px 18px;flex:1;min-width:140px;">
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;">${item.label}</div>
+            <div style="font-size:22px;font-weight:700;color:${item.color};">${d.count}</div>
+            <div style="font-size:11px;color:var(--text-muted);">€${d.esposizione.toFixed(2)}</div>
+        </div>`;
+    }).join('');
+}
+
+async function verificaAnteprima() {
+    const tolleranza = parseFloat(document.getElementById('verificaTolleranza').value) || 1.0;
+    const codice_pv  = document.getElementById('verificaImpiantoFilter').value || null;
+    const categoria  = document.getElementById('verificaCategoriaFilter').value || null;
+
+    const data = await apiFetch('/api/verifica/anteprima', {
+        method: 'POST',
+        body: JSON.stringify({ tolleranza, codice_pv, categoria })
+    });
+    if (!data) return;
+
+    _verificaMatches = data.matches || [];
+    const risultati = document.getElementById('verificaRisultati');
+    const empty     = document.getElementById('verificaEmpty');
+    const summary   = document.getElementById('verificaSummary');
+    const tbody     = document.getElementById('verificaBody');
+    const btnApplica = document.getElementById('btnApplicaVerifica');
+
+    if (_verificaMatches.length === 0) {
+        risultati.style.display = 'none';
+        empty.style.display = 'block';
+        btnApplica.style.display = 'none';
+        return;
+    }
+
+    empty.style.display = 'none';
+    risultati.style.display = 'block';
+    btnApplica.style.display = 'inline-block';
+
+    summary.innerHTML = `
+        <div style="display:flex;gap:24px;flex-wrap:wrap;">
+            <div><span style="font-size:24px;font-weight:700;color:#56d364;">${data.totale_coppie}</span><br><small style="color:var(--text-muted);">coppie compensabili</small></div>
+            <div><span style="font-size:24px;font-weight:700;color:#56d364;">${data.righe_compensabili}</span><br><small style="color:var(--text-muted);">righe da aggiornare</small></div>
+            <div><span style="font-size:24px;font-weight:700;color:#f85149;">€${data.esposizione_compensata.toFixed(2)}</span><br><small style="color:var(--text-muted);">esposizione compensata</small></div>
+        </div>`;
+
+    tbody.innerHTML = _verificaMatches.map((m, idx) => `
+        <tr>
+            <td><input type="checkbox" class="chk-match" data-idx="${idx}" checked onchange="aggiornaSelCount()"></td>
+            <td style="font-weight:500;">${m.impianto}</td>
+            <td>${renderCatBadge ? renderCatBadge(m.categoria) : m.categoria}</td>
+            <td style="text-align:right;">${m.data_pos}</td>
+            <td style="text-align:right;color:#f85149;font-weight:600;">+€${Math.abs(m.diff_pos).toFixed(2)}</td>
+            <td style="text-align:right;">${m.data_neg}</td>
+            <td style="text-align:right;color:#3fb950;font-weight:600;">−€${Math.abs(m.diff_neg).toFixed(2)}</td>
+            <td style="text-align:right;font-weight:600;color:${Math.abs(m.residuo) < 0.01 ? '#56d364' : '#d29922'};">€${Math.abs(m.residuo).toFixed(2)}</td>
+            <td><span class="status-badge status-anomalia-grave" style="font-size:11px;">${m.stato_pos}</span></td>
+        </tr>`).join('');
+
+    aggiornaSelCount();
+}
+
+function toggleSelAll(chk) {
+    document.querySelectorAll('.chk-match').forEach(c => { c.checked = chk.checked; });
+    aggiornaSelCount();
+}
+
+function aggiornaSelCount() {
+    const sel = document.querySelectorAll('.chk-match:checked').length;
+    const tot = document.querySelectorAll('.chk-match').length;
+    document.getElementById('verificaSelCount').textContent = `${sel} di ${tot} coppie selezionate`;
+}
+
+async function verificaApplica() {
+    const tolleranza = parseFloat(document.getElementById('verificaTolleranza').value) || 1.0;
+    const data = await apiFetch('/api/verifica/applica', {
+        method: 'POST',
+        body: JSON.stringify({ tolleranza })
+    });
+    if (!data) return;
+    alert(`✅ ${data.message}`);
+    await verificaAnteprima();
+    await _aggiornaVerificaStats();
+}
+
+async function verificaApplicaSelezionati() {
+    const tolleranza = parseFloat(document.getElementById('verificaTolleranza').value) || 1.0;
+    const checked = Array.from(document.querySelectorAll('.chk-match:checked'));
+    if (!checked.length) { alert('Seleziona almeno una coppia.'); return; }
+
+    const id_pairs = checked.map(c => {
+        const m = _verificaMatches[parseInt(c.dataset.idx)];
+        return [m.id_pos, m.id_neg];
+    });
+
+    const data = await apiFetch('/api/verifica/applica', {
+        method: 'POST',
+        body: JSON.stringify({ tolleranza, id_pairs })
+    });
+    if (!data) return;
+    alert(`✅ ${data.message}`);
+    await verificaAnteprima();
+    await _aggiornaVerificaStats();
+}
+
+async function verificaReset() {
+    if (!confirm('Annullare tutte le compensazioni già applicate? Le righe torneranno ad ANOMALIA_GRAVE.')) return;
+    const data = await apiFetch('/api/verifica/reset', { method: 'POST', body: '{}' });
+    if (!data) return;
+    alert('↩ ' + data.message);
+    document.getElementById('verificaRisultati').style.display = 'none';
+    document.getElementById('verificaEmpty').style.display = 'none';
+    document.getElementById('btnApplicaVerifica').style.display = 'none';
+    await _aggiornaVerificaStats();
+}
+
+let _aiAbortController = null;
+
+async function loadAIModels() {
+    try {
+        const data = await apiFetch('/api/ai-report/models');
+        if (!data) return;
+        const sel = document.getElementById('aiModelSelect');
+        if (!sel) return;
+        sel.innerHTML = data.models.map(m =>
+            `<option value="${m.id}" ${m.id === data.current ? 'selected' : ''}>${m.label}</option>`
+        ).join('');
+        // Popola anche il select impianti
+        const impData = await apiFetch('/api/impianti');
+        const impSel = document.getElementById('aiImpiantoSelect');
+        if (impSel && impData) {
+            impData.forEach(i => {
+                const opt = document.createElement('option');
+                opt.value = i.codice_pv;
+                opt.textContent = i.nome || i.codice_pv;
+                impSel.appendChild(opt);
+            });
+        }
+    } catch(e) { console.error('loadAIModels:', e); }
+}
+
+async function salvaModelloAI() {
+    const model = document.getElementById('aiModelSelect')?.value;
+    if (!model) return;
+    await apiFetch('/api/ai-report/model', { method: 'POST', body: JSON.stringify({ model }) });
+}
+
+function stopAIReport() {
+    if (_aiAbortController) _aiAbortController.abort();
+}
+
 async function generateAIReport() {
-    const btn = document.getElementById('btnGenerateAI');
-    const status = document.getElementById('aiStatus');
+    const btn       = document.getElementById('btnGenerateAI');
+    const btnStop   = document.getElementById('btnStopAI');
+    const status    = document.getElementById('aiStatus');
     const container = document.getElementById('aiReportContainer');
-    const body = document.getElementById('aiReportBody');
+    const reportBody = document.getElementById('aiReportBody');
     const timestamp = document.getElementById('aiTimestamp');
 
+    const model    = document.getElementById('aiModelSelect')?.value || 'openai/gpt-4o-mini';
+    const dataFrom = document.getElementById('aiDataFrom')?.value || null;
+    const dataTo   = document.getElementById('aiDataTo')?.value || null;
+    const codicePv = document.getElementById('aiImpiantoSelect')?.value || null;
+
     btn.disabled = true;
-    status.textContent = 'Analisi in corso...';
+    if (btnStop) btnStop.style.display = 'inline-block';
+    status.textContent = 'Analisi in corso…';
     status.className = 'ai-status loading';
-    container.style.display = 'none';
+    reportBody.innerHTML = '';
+    container.style.display = 'block';
+    timestamp.textContent = new Date().toLocaleString('it-IT');
+
+    _aiAbortController = new AbortController();
+    let rawText = '';
 
     try {
-        const data = await apiFetch('/api/ai-report', { method: 'POST' });
+        const token = localStorage.getItem('token');
+        const resp = await fetch('/api/ai-report/stream', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ model, data_from: dataFrom, data_to: dataTo, codice_pv: codicePv }),
+            signal: _aiAbortController.signal,
+        });
 
-        if (!data) {
-            throw new Error('Errore API o timeout');
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error(err.error || `HTTP ${resp.status}`);
         }
 
-        // Render markdown report
-        body.innerHTML = simpleMarkdownToHtml(data.report);
-        timestamp.textContent = new Date().toLocaleString('it-IT');
-        container.style.display = 'block';
-        status.textContent = 'Report generato!';
+        // Leggi testo completo (funziona sia con streaming sia con risposta bufferizzata)
+        const text = await resp.text();
+
+        // Parsa tutti gli eventi SSE
+        const lines = text.split('\n');
+        for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            const payload = line.slice(6).trim();
+            if (!payload || payload === '[DONE]') continue;
+            try {
+                const chunk = JSON.parse(payload);
+                if (chunk.error) throw new Error(chunk.error);
+                if (chunk.content) {
+                    rawText += chunk.content;
+                    reportBody.innerHTML = simpleMarkdownToHtml(rawText);
+                }
+            } catch(e) {
+                console.warn('SSE parse error:', e.message, '| payload:', payload.slice(0, 80));
+            }
+        }
+
+        if (!rawText) throw new Error('Nessun contenuto ricevuto dal modello AI.');
+
+        status.textContent = 'Report completato!';
         status.className = 'ai-status';
 
     } catch (err) {
-        status.textContent = 'Errore: ' + err.message;
-        status.className = 'ai-status';
-        status.style.color = 'var(--status-danger)';
+        if (err.name === 'AbortError') {
+            status.textContent = 'Generazione interrotta.';
+            if (rawText) { reportBody.innerHTML = simpleMarkdownToHtml(rawText); }
+        } else {
+            status.textContent = 'Errore: ' + err.message;
+            status.style.color = 'var(--status-danger)';
+        }
     } finally {
         btn.disabled = false;
+        if (btnStop) btnStop.style.display = 'none';
+        _aiAbortController = null;
     }
 }
 
@@ -1225,12 +1271,9 @@ async function loadConfig() {
     try {
         const data = await apiFetch('/api/settings/config');
         if (data) {
-            document.getElementById('cfg_contanti').value = data.tolleranza_contanti_arrotondamento || 2.00;
             document.getElementById('cfg_carte').value = data.tolleranza_carte_fisiologica || 1.00;
             document.getElementById('cfg_satispay').value = data.tolleranza_satispay || 0.01;
             document.getElementById('cfg_giorni').value = data.scarto_giorni_buoni || 1;
-            document.getElementById('cfg_giorni_contanti_inf').value = data.scarto_giorni_contanti_inf || 3;
-            document.getElementById('cfg_giorni_contanti_sup').value = data.scarto_giorni_contanti_sup || 7;
         }
     } catch (e) { console.error('Errore caricamento config:', e); }
 }
@@ -1243,12 +1286,9 @@ async function updateConfig(e) {
     status.style.color = 'var(--text-secondary)';
 
     const payload = {
-        tolleranza_contanti_arrotondamento: parseFloat(document.getElementById('cfg_contanti').value),
         tolleranza_carte_fisiologica: parseFloat(document.getElementById('cfg_carte').value),
         tolleranza_satispay: parseFloat(document.getElementById('cfg_satispay').value),
         scarto_giorni_buoni: parseInt(document.getElementById('cfg_giorni').value),
-        scarto_giorni_contanti_inf: parseInt(document.getElementById('cfg_giorni_contanti_inf').value),
-        scarto_giorni_contanti_sup: parseInt(document.getElementById('cfg_giorni_contanti_sup').value)
     };
 
     try {
@@ -1427,71 +1467,3 @@ function showToast(message, type = 'info') {
     setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity .3s'; setTimeout(() => el.remove(), 300); }, 3500);
 }
 
-async function loadContantiRiepilogo() {
-    const container = document.getElementById('contantiRiepilogo');
-    if (!container) return;
-    
-    container.innerHTML = '<div class="empty-state">Caricamento riepilogo PV...</div>';
-    
-    const data = await apiFetch('/api/contanti-riepilogo');
-    if (!data || data.length === 0) {
-        container.innerHTML = '';
-        return;
-    }
-
-    let html = `
-        <div class="section-header" style="margin-top: 0;">
-            <h4>📈 Riepilogo Differenze Totali per Impianto</h4>
-        </div>
-        <div class="verifiche-grid">
-    `;
-
-    html += data.map(pv => {
-        const diff = Math.abs(pv.differenza);
-        let colorClass = 'status-quadrato'; // Verde default
-        let indicatorColor = '#3fb950';
-
-        if (diff > 50) {
-            colorClass = 'status-anomalia-grave'; // Rosso
-            indicatorColor = '#f85149';
-        } else if (diff > 10) {
-            colorClass = 'status-anomalia-lieve'; // Giallo
-            indicatorColor = '#d29922';
-        } else if (diff > 2) {
-             // Tra 2 e 10 potremmo avere un colore intermedio o lasciarlo verde/giallo. 
-             // L'utente ha detto: vicino a 0 verde, sopra 10 giallo, sopra 40-50 rosso.
-             // Quindi < 10 lo consideriamo verde? O forse giallo lieve?
-             // Seguiamo pedissequamente: vicino a 0 verde. > 10 giallo. > 40-50 rosso.
-             colorClass = 'status-quadrato'; 
-             indicatorColor = '#3fb950';
-        }
-
-        return `
-            <div class="verifiche-card" style="border-left: 4px solid ${indicatorColor}">
-                <div class="verifiche-card-header">
-                    <h4>${pv.nome}</h4>
-                    <span class="verifiche-tipo">PV: ${pv.codice_pv}</span>
-                </div>
-                <div class="verifiche-body">
-                    <div class="verifiche-row">
-                        <span>Fortech (Tot):</span>
-                        <strong>${renderMoney(pv.tot_teorico)}</strong>
-                    </div>
-                    <div class="verifiche-row">
-                        <span>Contanti (Tot):</span>
-                        <strong>${renderMoney(pv.tot_reale)}</strong>
-                    </div>
-                    <div class="verifiche-row" style="margin-top:8px; border-top:1px solid var(--border-color); padding-top:8px;">
-                        <span>Differenza Tot:</span>
-                        <span class="status-badge ${colorClass}" style="font-weight:bold; font-size:14px;">
-                            ${renderDiff(pv.differenza)}
-                        </span>
-                    </div>
-                </div>
-            </div>
-        `;
-    }).join('');
-
-    html += '</div>';
-    container.innerHTML = html;
-}

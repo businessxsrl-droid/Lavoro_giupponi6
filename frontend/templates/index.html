@@ -41,14 +41,6 @@
                 <span class="nav-icon">🔄</span>
                 <span>Riconciliazioni</span>
             </li>
-            <li class="nav-item" data-view="contanti-riepilogo">
-                <span class="nav-icon">📈</span>
-                <span>Riepilogo Contanti</span>
-            </li>
-            <li class="nav-item" data-view="contanti-matching">
-                <span class="nav-icon">💰</span>
-                <span>Matching Contanti</span>
-            </li>
             <li class="nav-item" data-view="impianti">
                 <span class="nav-icon">🏢</span>
                 <span>Impianti</span>
@@ -56,6 +48,10 @@
             <li class="nav-item" data-view="sicurezza">
                 <span class="nav-icon">🔐</span>
                 <span>Sicurezza</span>
+            </li>
+            <li class="nav-item" data-view="verifica">
+                <span class="nav-icon">✅</span>
+                <span>Verifica</span>
             </li>
             <li class="nav-item" data-view="ai-report">
                 <span class="nav-icon">🤖</span>
@@ -229,45 +225,19 @@
                                 <th>Reale (€)</th>
                                 <th>Diff (€)</th>
                                 <th>Stato</th>
+                                <th>Prove eron. (€)</th>
+                                <th>Cli. fine mese (€)</th>
+                                <th>Diversi (€)</th>
                                 <th>Note</th>
                             </tr>
                         </thead>
                         <tbody id="riconciliazioniBody">
                             <tr>
-                                <td colspan="8" class="empty-state">Nessun dato</td>
+                                <td colspan="11" class="empty-state">Nessun dato</td>
                             </tr>
                         </tbody>
                     </table>
                 </div>
-            </div>
-        </section>
-
-        <!-- ═══ VIEW: RIEPILOGO CONTANTI (VISTA GLOBALE) ═══ -->
-        <section class="view" id="view-contanti-riepilogo">
-            <div class="section-header">
-                <h3>📈 Riepilogo Differenze Totali per Impianto</h3>
-                <button class="btn-refresh" onclick="loadContantiRiepilogo()">🔄 Aggiorna</button>
-            </div>
-            <p class="view-description">Situazione aggregata per ogni punto vendita. Le differenze sono calcolate come
-                sommatoria di tutti i dati Fortech meno la sommatoria di tutti i versamenti Excel.</p>
-            
-            <div id="contantiRiepilogoContainer" style="margin-top: 20px;">
-                <div id="contantiRiepilogo"></div>
-            </div>
-        </section>
-
-        <!-- ═══ VIEW: MATCHING CONTANTI (SIMONA - OPERATIVO) ═══ -->
-        <section class="view" id="view-contanti-matching">
-            <div class="section-header">
-                <h3>💰 Matching Contanti — Operativo</h3>
-                <button class="btn-refresh" onclick="loadContantiBanca()">🔄 Aggiorna</button>
-            </div>
-            <p class="view-description">Verifica i risultati del matching automatico tra contante teorico (Fortech) e
-                versamenti bancari (AS400). Espandi ogni riga per vedere i dettagli del calcolo.</p>
-
-            <div class="contanti-stats" id="contantiStats"></div>
-            <div class="contanti-list" id="contantiList">
-                <div class="empty-state">Nessun dato contanti disponibile</div>
             </div>
         </section>
 
@@ -318,18 +288,124 @@
             </div>
         </section>
 
+        <!-- ═══ VIEW: VERIFICA COMPENSAZIONI ═══ -->
+        <section class="view" id="view-verifica">
+            <div class="section-header">
+                <h3>✅ Verifica — Compensazioni Incrociate</h3>
+            </div>
+            <p class="view-description">
+                Individua anomalie con segni opposti che si annullano a vicenda (es. +230€ e −230€ sullo stesso impianto/categoria).
+                Le coppie compensate passano da <strong>Anomalia Grave</strong> a <strong>Quadrato Compensato</strong>.
+            </p>
+
+            <!-- Statistiche stato attuale -->
+            <div id="verificaStatsBar" style="display:flex; gap:12px; flex-wrap:wrap; margin-bottom:20px;"></div>
+
+            <!-- Controlli -->
+            <div class="settings-card" style="margin-bottom:20px;">
+                <div class="settings-card-body">
+                    <div style="display:flex; gap:16px; flex-wrap:wrap; align-items:flex-end;">
+                        <div class="form-group" style="flex:1; min-width:160px; margin:0;">
+                            <label>Tolleranza (€)</label>
+                            <input type="number" id="verificaTolleranza" class="settings-input" value="1.00" step="0.01" min="0" style="width:100%;">
+                            <small style="color:var(--text-muted);">Scarto massimo ammesso per considerare due anomalie compensate</small>
+                        </div>
+                        <div class="form-group" style="flex:2; min-width:180px; margin:0;">
+                            <label>Impianto (opzionale)</label>
+                            <select id="verificaImpiantoFilter" class="settings-input" style="width:100%;">
+                                <option value="">Tutti gli impianti</option>
+                            </select>
+                        </div>
+                        <div class="form-group" style="flex:2; min-width:160px; margin:0;">
+                            <label>Categoria (opzionale)</label>
+                            <select id="verificaCategoriaFilter" class="settings-input" style="width:100%;">
+                                <option value="">Tutte le categorie</option>
+                                <option value="pos">Carte Bancarie (POS)</option>
+                                <option value="satispay">Satispay</option>
+                                <option value="buoni">Buoni</option>
+                                <option value="petrolifere">Carte Petrolifere</option>
+                                <option value="buoni_petrolifere_combined">Buoni+Petrolifere</option>
+                            </select>
+                        </div>
+                        <div style="display:flex; gap:8px; align-items:flex-end; padding-bottom:2px;">
+                            <button class="btn btn-primary" onclick="verificaAnteprima()">🔍 Analizza</button>
+                            <button class="btn btn-success" id="btnApplicaVerifica" onclick="verificaApplica()" style="display:none;">⚡ Applica Tutto</button>
+                            <button class="btn btn-small" onclick="verificaReset()" title="Annulla tutte le compensazioni già applicate">↩ Reset</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Risultati anteprima -->
+            <div id="verificaRisultati" style="display:none;">
+                <div id="verificaSummary" style="margin-bottom:16px; padding:16px; background:var(--bg-card); border-radius:8px; border:1px solid var(--border-color);"></div>
+
+                <div class="table-container">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th style="width:40px;"><input type="checkbox" id="chkSelAll" onchange="toggleSelAll(this)"></th>
+                                <th>Impianto</th>
+                                <th>Categoria</th>
+                                <th style="text-align:right;">Data +</th>
+                                <th style="text-align:right;">Diff + (€)</th>
+                                <th style="text-align:right;">Data −</th>
+                                <th style="text-align:right;">Diff − (€)</th>
+                                <th style="text-align:right;">Residuo (€)</th>
+                                <th>Stato orig.</th>
+                            </tr>
+                        </thead>
+                        <tbody id="verificaBody"></tbody>
+                    </table>
+                </div>
+                <div style="margin-top:12px; display:flex; gap:10px; align-items:center;">
+                    <button class="btn btn-success" onclick="verificaApplicaSelezionati()">⚡ Applica Selezionati</button>
+                    <span id="verificaSelCount" style="color:var(--text-muted); font-size:13px;"></span>
+                </div>
+            </div>
+
+            <div id="verificaEmpty" style="display:none; padding:40px; text-align:center; color:var(--text-muted);">
+                ✅ Nessuna coppia compensabile trovata con i criteri selezionati.
+            </div>
+        </section>
+
         <!-- ═══ VIEW: AI REPORT ═══ -->
         <section class="view" id="view-ai-report">
             <div class="section-header">
                 <h3>🤖 Report AI — Analisi Intelligente</h3>
             </div>
-            <p class="view-description">L'intelligenza artificiale analizza i risultati della riconciliazione e genera
-                un report professionale con anomalie, criticità e suggerimenti. Powered by OpenRouter (GPT-4o Mini).</p>
+            <p class="view-description">L'intelligenza artificiale analizza i risultati della riconciliazione e genera un report professionale con anomalie, criticità e suggerimenti. Powered by <strong>OpenRouter</strong>.</p>
+
+            <div class="settings-card" style="margin-bottom:20px;">
+                <div class="settings-card-body">
+                    <div style="display:flex; gap:16px; flex-wrap:wrap; align-items:flex-end;">
+                        <div class="form-group" style="flex:2; min-width:220px; margin:0;">
+                            <label>Modello AI</label>
+                            <select id="aiModelSelect" class="settings-input" style="width:100%;" onchange="salvaModelloAI()"></select>
+                        </div>
+                        <div class="form-group" style="flex:1; min-width:140px; margin:0;">
+                            <label>Da data</label>
+                            <input type="date" id="aiDataFrom" class="settings-input" style="width:100%;">
+                        </div>
+                        <div class="form-group" style="flex:1; min-width:140px; margin:0;">
+                            <label>A data</label>
+                            <input type="date" id="aiDataTo" class="settings-input" style="width:100%;">
+                        </div>
+                        <div class="form-group" style="flex:2; min-width:180px; margin:0;">
+                            <label>Impianto (opzionale)</label>
+                            <select id="aiImpiantoSelect" class="settings-input" style="width:100%;">
+                                <option value="">Tutti gli impianti</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </div>
 
             <div class="ai-controls">
                 <button class="btn btn-ai" id="btnGenerateAI" onclick="generateAIReport()">
                     <span class="ai-sparkle">✨</span> Genera Report AI
                 </button>
+                <button class="btn btn-small" id="btnStopAI" onclick="stopAIReport()" style="display:none;">⏹ Interrompi</button>
                 <span class="ai-status" id="aiStatus"></span>
             </div>
 
@@ -393,19 +469,8 @@
                     <div class="settings-card-body">
                         <form id="formConfig" onsubmit="updateConfig(event)">
 
-                            <div class="settings-section-title">Contanti & Carte</div>
+                            <div class="settings-section-title">Carte & Pagamenti</div>
                             <div class="settings-list">
-                                <div class="settings-item">
-                                    <div class="settings-item-info">
-                                        <label for="cfg_contanti">Tolleranza Contanti (Arrotondamento)</label>
-                                    </div>
-                                    <div class="settings-item-control">
-                                        <span class="currency-symbol">€</span>
-                                        <input type="number" step="0.01" id="cfg_contanti"
-                                            class="settings-input text-right" required>
-                                    </div>
-                                </div>
-
                                 <div class="settings-item">
                                     <div class="settings-item-info">
                                         <label for="cfg_carte">Tolleranza Carte Bancarie (Fisiologica)</label>
@@ -442,27 +507,6 @@
                                     </div>
                                 </div>
 
-                                <div class="settings-item">
-                                    <div class="settings-item-info">
-                                        <label for="cfg_giorni_contanti_inf">Anticipo Versamento Contanti (max)</label>
-                                    </div>
-                                    <div class="settings-item-control">
-                                        <input type="number" step="1" id="cfg_giorni_contanti_inf"
-                                            class="settings-input text-right w-80" required>
-                                        <span class="unit-symbol">gg</span>
-                                    </div>
-                                </div>
-
-                                <div class="settings-item">
-                                    <div class="settings-item-info">
-                                        <label for="cfg_giorni_contanti_sup">Ritardo Versamento Contanti (max)</label>
-                                    </div>
-                                    <div class="settings-item-control">
-                                        <input type="number" step="1" id="cfg_giorni_contanti_sup"
-                                            class="settings-input text-right w-80" required>
-                                        <span class="unit-symbol">gg</span>
-                                    </div>
-                                </div>
                             </div>
 
                             <button type="submit" class="btn-vibrant w-100 mt-4">Salva Tolleranze</button>

@@ -118,7 +118,7 @@ class SupabaseConnection:
                         print(f"[DB Batch Error] Chiamata fallita, provo record singolarmente: {e}")
                         for p in chunk:
                             try: self.execute(query, p)
-                            except: pass
+                            except Exception as ex: print(f"[DB Batch Fallback Error] {ex}")
                 return
             except Exception as e:
                 print(f"[DB Optimization Error] Fallback al loop standard: {e}")
@@ -126,7 +126,7 @@ class SupabaseConnection:
         # Fallback universale (loop per query non-insert o se l'ottimizzazione fallisce)
         for p in params_list:
             try: self.execute(query, p)
-            except: pass
+            except Exception as ex: print(f"[DB Loop Error] {ex}")
 
     def commit(self): pass
     def rollback(self): pass
@@ -166,6 +166,16 @@ class SupabaseConnection:
 class PostgresCursor:
     def __init__(self, cursor):
         self._cursor = cursor
+
+    def execute(self, query, params=None):
+        """Permette l'uso di c = conn.cursor(); c.execute(...).fetchone()"""
+        q = query.replace('?', '%s')
+        try:
+            self._cursor.execute(q, params)
+        except Exception as e:
+            print(f"[PostgresCursor Error] {e} | Query: {q[:200]}")
+            raise
+        return self
 
     def fetchone(self):
         row = self._cursor.fetchone()
@@ -230,10 +240,10 @@ def init_db():
     # SQL di creazione tabelle (stesso di prima)
     tables_sql = """
     CREATE TABLE IF NOT EXISTS impianti (
-        id SERIAL PRIMARY KEY, codice_pv INTEGER NOT NULL UNIQUE, nome TEXT, comune TEXT, indirizzo TEXT, alias_terminale TEXT, tipo_gestione TEXT DEFAULT 'PRESIDIATO'
+        id SERIAL PRIMARY KEY, codice_pv INTEGER NOT NULL UNIQUE, nome TEXT, comune TEXT, indirizzo TEXT, alias_terminale TEXT, tipo_gestione TEXT DEFAULT 'PRESIDIATO', senza_servizio_riconciliazione BOOLEAN DEFAULT FALSE
     );
     CREATE TABLE IF NOT EXISTS transazioni_fortech (
-        id SERIAL PRIMARY KEY, codice_pv INTEGER NOT NULL REFERENCES impianti(codice_pv), data TEXT NOT NULL, totale_contante NUMERIC DEFAULT 0, totale_pos NUMERIC DEFAULT 0, totale_buoni NUMERIC DEFAULT 0, totale_satispay NUMERIC DEFAULT 0, totale_petrolifere NUMERIC DEFAULT 0, UNIQUE(codice_pv, data)
+        id SERIAL PRIMARY KEY, codice_pv INTEGER NOT NULL REFERENCES impianti(codice_pv), data TEXT NOT NULL, totale_contante NUMERIC DEFAULT 0, totale_pos NUMERIC DEFAULT 0, totale_buoni NUMERIC DEFAULT 0, totale_satispay NUMERIC DEFAULT 0, totale_petrolifere NUMERIC DEFAULT 0, prove_erogazione NUMERIC DEFAULT 0, clienti_fine_mese NUMERIC DEFAULT 0, diversi NUMERIC DEFAULT 0, UNIQUE(codice_pv, data)
     );
     CREATE TABLE IF NOT EXISTS transazioni_contanti (
         id SERIAL PRIMARY KEY, data TEXT NOT NULL, codice_pv INTEGER REFERENCES impianti(codice_pv), importo NUMERIC, note_raw TEXT
@@ -262,24 +272,58 @@ def init_db():
     """
     conn.execute(tables_sql)
 
+    # Migration: aggiungi colonne nuove se non esistono (per DB già esistenti)
+    migrations = [
+        "ALTER TABLE impianti ADD COLUMN IF NOT EXISTS senza_servizio_riconciliazione BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE transazioni_fortech ADD COLUMN IF NOT EXISTS prove_erogazione NUMERIC DEFAULT 0",
+        "ALTER TABLE transazioni_fortech ADD COLUMN IF NOT EXISTS clienti_fine_mese NUMERIC DEFAULT 0",
+        "ALTER TABLE transazioni_fortech ADD COLUMN IF NOT EXISTS diversi NUMERIC DEFAULT 0",
+    ]
+    for sql in migrations:
+        try:
+            conn.execute(sql)
+        except Exception:
+            pass  # Colonna già presente
+
     # Dati di default
     defaults = {
-        'tolleranza_contanti_arrotondamento': '2.00',
-        'tolleranza_carte_fisiologica':       '1.00',
-        'tolleranza_satispay':                '0.01',
-        'tolleranza_buoni':                   '0.01',
-        'tolleranza_petrolifere':             '0.01',
-        'scarto_giorni_buoni':                '1',
-        'scarto_giorni_contanti_inf':         '3',
-        'scarto_giorni_contanti_sup':         '7',
+        'tolleranza_contanti_arrotondamento':  '2.00',
+        'tolleranza_carte_fisiologica':        '1.00',
+        'tolleranza_satispay':                 '0.01',
+        'tolleranza_buoni':                    '0.01',
+        'tolleranza_petrolifere':              '0.01',
+        'scarto_giorni_buoni':                 '1',
+        'scarto_giorni_contanti_inf':          '3',
+        'scarto_giorni_contanti_sup':          '7',
+        'riconciliazione_contanti_abilitata':  'false',
     }
     for k, v in defaults.items():
         conn.execute("INSERT INTO config (chiave, valore) VALUES (?, ?) ON CONFLICT (chiave) DO NOTHING", (k, v))
-    
+
     pw_hash = hashlib.sha256("calor2024".encode()).hexdigest()
     conn.execute("INSERT INTO users (username, password_hash) VALUES (?, ?) ON CONFLICT (username) DO UPDATE SET password_hash = EXCLUDED.password_hash", ("admin", pw_hash))
-    
-    print("[DB] HTTP Supabase inizializzato.")
+
+    # Marca impianti senza servizio di riconciliazione
+    _SENZA_SERVIZIO_PVS = [47831, 45874, 47832, 41118, 42840, 45818, 49788]
+    for pv in _SENZA_SERVIZIO_PVS:
+        try:
+            conn.execute(
+                "UPDATE impianti SET senza_servizio_riconciliazione = TRUE WHERE codice_pv = ?", (pv,)
+            )
+        except Exception:
+            pass
+
+    # Inserisci Famagosta se non presente
+    try:
+        conn.execute('''
+            INSERT INTO impianti (codice_pv, nome, comune, indirizzo, tipo_gestione, senza_servizio_riconciliazione)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(codice_pv) DO UPDATE SET senza_servizio_riconciliazione = TRUE
+        ''', (45818, 'Famagosta', 'Milano', 'Viale Famagosta 15', 'PRESIDIATO', True))
+    except Exception:
+        pass
+
+    print("[DB] DB inizializzato.")
 
 def get_config(conn=None) -> dict:
     if conn is None: conn = get_connection()

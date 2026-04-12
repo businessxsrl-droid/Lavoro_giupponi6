@@ -25,8 +25,50 @@ _gen_sql_supabase.py
 _test_*.py
 _debug_*.py
 _analyze_*.py
+_check_skip.py
+_diagnostic_weekly.py
+_export_buoni.py
 test_rpc.py
+test_500.py
 _sql_*.sql
+migrate_to_postgres.py
+export_to_supabase.py
+push_to_github.bat
+
+# Old DB files
+*.db
+reconciliator*.db
+
+# Dev/planning docs
+research_notes.md
+PIANO_MODIFICHE.md
+PROGETTO.md
+_test_classify_output.txt
+
+# Docker (non usato su Render)
+Dockerfile
+docker-compose.yml
+
+# Supabase setup (one-time, non serve al deploy)
+supabase_setup.sql
+supabase_fix_exec_sql.sql
+
+# Claude MCP / local tooling
+.mcp.json
+
+# Output/temp files
+risultato_*.xlsx
+Test_Riconciliazioni*.xlsx
+text_extract*.txt
+view_rolling.txt
+tmp_reconciler_old.py
+
+# Data folders (dati locali, non per deploy)
+data/
+excel/db_schema/
+
+# Claude Code local settings
+.claude/
 
 # System / IDE
 .DS_Store

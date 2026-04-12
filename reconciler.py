@@ -1,6 +1,6 @@
 """
 Motore di riconciliazione — Lavoro Giupponi6
-Legge le transazioni dal DB e produce riconciliazione_risultati e contanti_matching.
+Legge le transazioni dal DB e produce riconciliazione_risultati.
 """
 import pandas as pd
 from datetime import datetime, timedelta
@@ -55,7 +55,7 @@ def _inserisci_risultato(conn, pv: int, data: str, cat: str,
     stato = _calcola_stato(teorico, reale, tolleranza)
     if stato is None:
         return 0
-    diff: float = round(teorico - reale, 2)  # type: ignore[call-overload]
+    diff: float = round(reale - teorico, 2)  # type: ignore[call-overload]
     conn.execute(_SQL_UPSERT, (pv, data, cat, teorico, reale, diff, stato, tipo_match, note))
     return 1
 
@@ -87,48 +87,27 @@ def _to_df(conn, query, columns) -> pd.DataFrame:
         print(f"[RECONCILER ERROR] Fallito caricamento DataFrame: {e}")
         return pd.DataFrame(columns=columns)
 
+# Impianti senza servizio riconciliazione (hardcoded come fallback)
+_SENZA_SERVIZIO_HARDCODED = {47831, 45874, 47832, 41118, 42840, 45818, 49788}
+
+
+def _get_impianti_senza_servizio(conn) -> set:
+    """Ritorna set di codice_pv degli impianti senza servizio riconciliazione."""
+    try:
+        rows = conn.execute(
+            "SELECT codice_pv FROM impianti WHERE senza_servizio_riconciliazione = TRUE"
+        ).fetchall()
+        pvs = {int(r["codice_pv"]) for r in rows if r["codice_pv"] is not None}
+        return pvs if pvs else _SENZA_SERVIZIO_HARDCODED
+    except Exception as e:
+        print(f"[WARN] Errore caricamento impianti senza servizio: {e}")
+        return _SENZA_SERVIZIO_HARDCODED
+
+
 def _carica_fortech(conn) -> pd.DataFrame:
     """Legge tutte le giornate Fortech dal DB."""
     cols = ["codice_pv", "data", "totale_contante", "totale_pos", "totale_buoni", "totale_satispay", "totale_petrolifere"]
     return _to_df(conn, f"SELECT {', '.join(cols)} FROM transazioni_fortech", cols)
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  CONTANTI
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def _reconcile_contanti(conn, df_f: pd.DataFrame, tol: float) -> int:
-    """
-    Sincronizza i risultati della logica Look-Ahead FIFO (da contanti_matching)
-    nella tabella generale riconciliazione_risultati.
-    """
-    rows = conn.execute('''
-        SELECT codice_pv, data, contanti_teorico, contanti_versato, differenza, stato, tipo_match, note
-        FROM contanti_matching
-    ''').fetchall()
-
-    params = []
-    for r in rows:
-        params.append((
-            int(r["codice_pv"]), 
-            r["data"], 
-            "contanti", 
-            float(r["contanti_teorico"]), 
-            float(r["contanti_versato"]), 
-            float(r["differenza"]), 
-            r["stato"],
-            r["tipo_match"],
-            r["note"]
-        ))
-
-
-    
-    if params:
-        conn.executemany(_SQL_UPSERT, params)
-        
-    count = len(params)
-    print(f"  [contanti]      {count} record (sincronizzati da rolling)")
-    return count
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -166,7 +145,7 @@ def _reconcile_carte_bancarie(conn, df_f: pd.DataFrame, tol: float) -> int:
         reale   = float(row["reale"])
         stato   = _calcola_stato(teorico, reale, tol)
         if stato:
-            diff = round(teorico - reale, 2)
+            diff = round(reale - teorico, 2)
             params.append((int(row["codice_pv"]), row["data"], "carte_bancarie", teorico, reale, diff, stato, "nessuno", ""))
 
 
@@ -202,7 +181,7 @@ def _reconcile_satispay(conn, df_f: pd.DataFrame, tol: float) -> int:
         reale   = float(row["reale"])
         stato   = _calcola_stato(teorico, reale, tol)
         if stato:
-            diff = round(teorico - reale, 2)
+            diff = round(reale - teorico, 2)
             params.append((int(row["codice_pv"]), row["data"], "satispay", teorico, reale, diff, stato, "nessuno", ""))
 
 
@@ -217,10 +196,11 @@ def _reconcile_satispay(conn, df_f: pd.DataFrame, tol: float) -> int:
 #  BUONI / VOUCHER
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _reconcile_buoni(conn, df_f: pd.DataFrame, tol: float) -> int:
+def _reconcile_buoni(conn, df_f: pd.DataFrame, tol: float, exclude_pvs: set = None) -> int:
     """Riconcilia i buoni/voucher (iP Portal) vs Fortech.
     Teorico = totale_buoni (= BUONI + CARTAPETROLIFERA dal Fortech).
     Reale   = somma Importo dal file iPortal, raggruppato per data e codice PV (ultimi 5 cifre).
+    exclude_pvs: impianti senza servizio (gestiti da _reconcile_buoni_petrolifere_combined).
     """
     cols = ["codice_pv", "data", "reale"]
     df_reale = _to_df(conn,
@@ -228,7 +208,8 @@ def _reconcile_buoni(conn, df_f: pd.DataFrame, tol: float) -> int:
         "FROM transazioni_buoni WHERE codice_pv IS NOT NULL "
         "GROUP BY codice_pv, data", cols)
 
-    m = df_f[["codice_pv", "data", "totale_buoni"]].copy()
+    df_src = df_f[~df_f["codice_pv"].isin(exclude_pvs)].copy() if exclude_pvs else df_f.copy()
+    m = df_src[["codice_pv", "data", "totale_buoni"]].copy()
     if not df_reale.empty:
         m = m.merge(df_reale, on=["codice_pv", "data"], how="left")
     else:
@@ -241,7 +222,7 @@ def _reconcile_buoni(conn, df_f: pd.DataFrame, tol: float) -> int:
         reale   = float(row["reale"])
         stato   = _calcola_stato(teorico, reale, tol)
         if stato:
-            diff = round(teorico - reale, 2)
+            diff = round(reale - teorico, 2)
             params.append((int(row["codice_pv"]), row["data"], "buoni", teorico, reale, diff, stato, "nessuno", ""))
 
 
@@ -256,7 +237,63 @@ def _reconcile_buoni(conn, df_f: pd.DataFrame, tol: float) -> int:
 #  CARTE PETROLIFERE
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _reconcile_petrolifere(conn, df_f: pd.DataFrame, tol: float) -> int:
+def _reconcile_buoni_petrolifere_combined(conn, df_f: pd.DataFrame, tol: float, pvs: set) -> int:
+    """Per impianti senza servizio: reconcilia buoni+petrolifere come unica categoria."""
+    if not pvs:
+        return 0
+    df_ss = df_f[df_f["codice_pv"].isin(pvs)].copy()
+    if df_ss.empty:
+        return 0
+
+    df_ss["teorico"] = df_ss["totale_buoni"] + df_ss["totale_petrolifere"]
+
+    cols = ["codice_pv", "data", "reale"]
+    df_buoni = _to_df(conn,
+        "SELECT codice_pv, data, SUM(importo) AS reale "
+        "FROM transazioni_buoni WHERE codice_pv IS NOT NULL "
+        "GROUP BY codice_pv, data", cols)
+    df_petro = _to_df(conn,
+        "SELECT codice_pv, data, SUM(importo) AS reale "
+        "FROM transazioni_petrolifere WHERE codice_pv IS NOT NULL "
+        "GROUP BY codice_pv, data", cols)
+
+    if not df_buoni.empty and not df_petro.empty:
+        df_reale = (pd.concat([df_buoni, df_petro])
+                    .groupby(["codice_pv", "data"])["reale"].sum().reset_index())
+    elif not df_buoni.empty:
+        df_reale = df_buoni
+    elif not df_petro.empty:
+        df_reale = df_petro
+    else:
+        df_reale = pd.DataFrame(columns=["codice_pv", "data", "reale"])
+
+    if not df_reale.empty:
+        df_reale["codice_pv"] = df_reale["codice_pv"].astype(int)
+
+    m = df_ss[["codice_pv", "data", "teorico"]].copy()
+    if not df_reale.empty:
+        m = m.merge(df_reale, on=["codice_pv", "data"], how="left")
+    else:
+        m["reale"] = 0.0
+    m.fillna(0.0, inplace=True)
+
+    params = []
+    for _, row in m.iterrows():
+        teorico = float(row["teorico"])
+        reale   = float(row["reale"])
+        stato   = _calcola_stato(teorico, reale, tol)
+        if stato:
+            diff = round(reale - teorico, 2)
+            params.append((int(row["codice_pv"]), row["data"], "buoni_petrolifere",
+                           teorico, reale, diff, stato, "nessuno", ""))
+
+    conn.executemany(_SQL_UPSERT, params)
+    count = len(params)
+    print(f"  [buoni_petrolifere] {count} record (impianti senza servizio)")
+    return count
+
+
+def _reconcile_petrolifere(conn, df_f: pd.DataFrame, tol: float, exclude_pvs: set = None) -> int:
     """Riconcilia le carte petrolifere vs Fortech."""
     cols = ["codice_pv", "data", "reale"]
     df_reale = _to_df(conn,
@@ -264,7 +301,8 @@ def _reconcile_petrolifere(conn, df_f: pd.DataFrame, tol: float) -> int:
         "FROM transazioni_petrolifere WHERE codice_pv IS NOT NULL "
         "GROUP BY codice_pv, data", cols)
 
-    m = df_f[["codice_pv", "data", "totale_petrolifere"]].copy()
+    df_src = df_f[~df_f["codice_pv"].isin(exclude_pvs)].copy() if exclude_pvs else df_f.copy()
+    m = df_src[["codice_pv", "data", "totale_petrolifere"]].copy()
     if not df_reale.empty:
         m = m.merge(df_reale, on=["codice_pv", "data"], how="left")
     else:
@@ -277,7 +315,7 @@ def _reconcile_petrolifere(conn, df_f: pd.DataFrame, tol: float) -> int:
         reale   = float(row["reale"])
         stato   = _calcola_stato(teorico, reale, tol)
         if stato:
-            diff = round(teorico - reale, 2)
+            diff = round(reale - teorico, 2)
             params.append((int(row["codice_pv"]), row["data"], "carte_petrolifere", teorico, reale, diff, stato, "nessuno", ""))
 
 
@@ -285,7 +323,6 @@ def _reconcile_petrolifere(conn, df_f: pd.DataFrame, tol: float) -> int:
     conn.executemany(_SQL_UPSERT, params)
     count = len(params)
     print(f"  [carte_petrolifere]   {count} record")
-    return count
     return count
 
 
@@ -306,7 +343,6 @@ def reconcile(conn=None) -> int:
     cfg = get_config(conn)
 
     tol = {
-        "contanti":       float(cfg.get("tolleranza_contanti_arrotondamento", 2.00)),
         "carte_bancarie": float(cfg.get("tolleranza_carte_fisiologica",       1.00)),
         "satispay":       float(cfg.get("tolleranza_satispay",                0.01)),
         "buoni":          float(cfg.get("tolleranza_buoni",                   0.01)),
@@ -322,17 +358,35 @@ def reconcile(conn=None) -> int:
             conn.close()
         return 0
 
-    # Il matching contanti deve girare PRIMA delle categorie:
-    # _reconcile_contanti lo usa per gestire date sfasate e versamenti cumulativi
-    _reconcile_contanti_matching(conn, cfg)
+    # Carica impianti senza servizio (logica riconciliazione combinata buoni+petrolifere)
+    senza_servizio_pvs = _get_impianti_senza_servizio(conn)
 
     print("[reconcile] Avvio riconciliazione per categoria:")
     inserted = 0
-    inserted += _reconcile_contanti(conn, df_f, tol["contanti"])
-    inserted += _reconcile_carte_bancarie(conn, df_f, tol["carte_bancarie"])
-    inserted += _reconcile_satispay(conn, df_f, tol["satispay"])
-    inserted += _reconcile_buoni(conn, df_f, tol["buoni"])
-    inserted += _reconcile_petrolifere(conn, df_f, tol["carte_petrolifere"])
+    try:
+        inserted += _reconcile_carte_bancarie(conn, df_f, tol["carte_bancarie"])
+    except Exception as e:
+        print(f"  [ERR] carte_bancarie: {e}")
+
+    try:
+        inserted += _reconcile_satispay(conn, df_f, tol["satispay"])
+    except Exception as e:
+        print(f"  [ERR] satispay: {e}")
+
+    try:
+        inserted += _reconcile_buoni(conn, df_f, tol["buoni"], exclude_pvs=senza_servizio_pvs)
+    except Exception as e:
+        print(f"  [ERR] buoni: {e}")
+
+    try:
+        inserted += _reconcile_petrolifere(conn, df_f, tol["carte_petrolifere"], exclude_pvs=senza_servizio_pvs)
+    except Exception as e:
+        print(f"  [ERR] petrolifere: {e}")
+
+    try:
+        inserted += _reconcile_buoni_petrolifere_combined(conn, df_f, tol["buoni"], pvs=senza_servizio_pvs)
+    except Exception as e:
+        print(f"  [ERR] buoni_petrolifere_combined: {e}")
 
     conn.commit()
     print(f"[reconcile] Totale inseriti: {inserted} record in riconciliazione_risultati")
@@ -340,126 +394,6 @@ def reconcile(conn=None) -> int:
     if close:
         conn.close()
     return inserted
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  MATCHING CONTANTI (Vista Simona)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def _reconcile_contanti_matching(conn, cfg: dict):
-    tolleranza  = float(cfg.get("tolleranza_contanti_arrotondamento", 2.00))
-
-    cols_fort = ["codice_pv", "data", "totale_contante"]
-    df_fort = _to_df(conn,
-        "SELECT codice_pv, data, totale_contante FROM transazioni_fortech "
-        "ORDER BY codice_pv, data", cols_fort)
-        
-    cols_as4 = ["codice_pv", "data", "importo"]
-    df_as400 = _to_df(conn,
-        "SELECT codice_pv, data, SUM(importo) AS importo "
-        "FROM transazioni_contanti WHERE codice_pv IS NOT NULL "
-        "GROUP BY codice_pv, data ORDER BY codice_pv, data", cols_as4)
-
-    conn.execute("DELETE FROM contanti_matching WHERE TRUE")
-
-    if df_fort.empty and df_as400.empty:
-        conn.commit()
-        return
-
-    fort_data = {}
-    for _, r in df_fort.iterrows():
-        fort_data[(int(r["codice_pv"]), r["data"])] = float(r["totale_contante"])
-        
-    as400_data = {}
-    for _, r in df_as400.iterrows():
-        as400_data[(int(r["codice_pv"]), r["data"])] = float(r["importo"])
-
-
-    pvs = sorted(list(set(df_fort["codice_pv"].unique()) | set(df_as400["codice_pv"].unique())))
-    all_dates = sorted(list(set(df_fort["data"].unique()) | set(df_as400["data"].unique())))
-
-    results = []
-    
-    for pv in pvs:
-        pv_int = int(pv)
-        scarto_precedente = 0.0
-        
-        # Facciamo una copia locale dei versamenti perché li "consumeremo" andando in avanti (Look-Ahead FIFO)
-        local_r = {d: as400_data.get((pv_int, d), 0.0) for d in all_dates}
-        
-        for i, d_str in enumerate(all_dates):
-            t = fort_data.get((pv_int, d_str), 0.0)
-            v = local_r[d_str]
-            
-            # Saltiamo i giorni dove non succede nulla per questo PV se lo scarto è quasi zero
-            if t == 0 and v == 0 and abs(scarto_precedente) < 0.01:
-                continue
-                
-            # Calcolo differenza inziale = (Teorico + Scarto Precedente) - Versato del giorno
-            differenza_giorno = round(t + scarto_precedente - v, 2)
-            versato_mostrato = v
-            local_r[d_str] = 0.0 # Consumato
-            
-            # Look-Ahead: Se manca contante (Diff > 0), peschiamo dai giorni successivi
-            j = i + 1
-            pescati_futuro = 0
-            while differenza_giorno > tolleranza and j < len(all_dates):
-                next_date = all_dates[j]
-                next_v = local_r[next_date]
-                if next_v > 0:
-                    versato_mostrato = round(versato_mostrato + next_v, 2)
-                    differenza_giorno = round(differenza_giorno - next_v, 2)
-                    local_r[next_date] = 0.0 # Soldi del futuro consumati oggi!
-                    pescati_futuro += 1
-                j += 1
-                
-            tipo_match = "look_ahead_fifo"
-            
-            # Generazione Note Automatica
-            note_list = []
-            if scarto_precedente > 0:
-                note_list.append(f"Include mancanza gg precedenti (€{scarto_precedente:.2f})")
-            elif scarto_precedente < -0.01:
-                note_list.append(f"Coperto da eccedenza gg precedenti (€{abs(scarto_precedente):.2f})")
-            
-            if pescati_futuro > 0:
-                note_list.append(f"Recuperati versamenti da {pescati_futuro} gg successivi")
-            
-            # Determiniamo lo stato
-            if abs(differenza_giorno) <= tolleranza:
-                stato = ST_QUADRATO
-                scarto_precedente = 0.0
-            else:
-                if differenza_giorno > _ANOMALIA_GRAVE_THRESHOLD:
-                    stato = ST_ANOMALIA_GRAVE
-                elif differenza_giorno > 0:
-                    stato = ST_ANOMALIA_LIEVE
-                else: 
-                    # Negativo (Surplus): Trasferiamo tutto lo scarto al giorno dopo ed è quadrato!
-                    stato = ST_QUADRATO 
-                scarto_precedente = differenza_giorno
-                if scarto_precedente < -0.01:
-                    note_list.append(f"Eccedenza di €{abs(scarto_precedente):.2f} portata al gg successivo")
-
-            # SKIP DEI GIORNI A ZERO TEORICO
-            # Se teorico è 0, non vogliamo riconciliare la giornata nella dashboard, 
-            # ma lo scarto si è già aggiornato per il giorno dopo (riga 437)
-            if t > 0:
-                note_str = " | ".join(note_list)
-                results.append((pv_int, d_str, t, versato_mostrato, differenza_giorno, stato, tipo_match, note_str))
-
-
-    if results:
-
-        conn.executemany('''
-            INSERT INTO contanti_matching
-                (codice_pv, data, contanti_teorico, contanti_versato, differenza, stato, tipo_match, note)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ''', results)
-
-
-    conn.commit()
-    print(f"[reconcile] contanti_matching (rolling): {len(results)} record")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

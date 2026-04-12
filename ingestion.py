@@ -146,6 +146,27 @@ def ingest_impianti(conn=None) -> int:
         ''', (imp["codice_pv"], nome, imp["comune"], imp["indirizzo"], imp.get("tipo_gestione", "PRESIDIATO")))
         count += 1
 
+    # Marca impianti senza servizio di riconciliazione
+    _SENZA_SERVIZIO_PVS = [47831, 45874, 47832, 41118, 42840, 45818]
+    for pv in _SENZA_SERVIZIO_PVS:
+        try:
+            conn.execute(
+                "UPDATE impianti SET senza_servizio_riconciliazione = TRUE WHERE codice_pv = ?", (pv,)
+            )
+        except Exception:
+            pass
+
+    # Inserisci Famagosta se non presente
+    try:
+        conn.execute('''
+            INSERT INTO impianti (codice_pv, nome, comune, indirizzo, tipo_gestione, senza_servizio_riconciliazione)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(codice_pv) DO UPDATE SET senza_servizio_riconciliazione = TRUE
+        ''', (45818, 'Famagosta', 'Milano', 'Viale Famagosta 15', 'PRESIDIATO', True))
+        count += 1
+    except Exception:
+        pass
+
     conn.commit()
     if close:
         conn.close()
@@ -179,7 +200,15 @@ def _trova_pv_da_alias(alias: str, impianti: list[dict]) -> int | None:
     """Ricerca fuzzy alias terminale POS → codice_pv (porta logica di calcolo_carte_bancarie.py)."""
     if not alias or str(alias) == "nan":
         return None
-    kw = str(alias).upper().replace(" SELF", "").replace(" CORDLESS", "").strip()
+
+    # Formato alternativo: l'alias è già il codice_pv numerico (Ghislandi/Rovetta/Taleggio)
+    alias_stripped = str(alias).strip()
+    if alias_stripped.isdigit():
+        pv_int = int(alias_stripped)
+        if any(imp["pv"] == pv_int for imp in impianti):
+            return pv_int
+
+    kw = alias_stripped.upper().replace(" SELF", "").replace(" CORDLESS", "").strip()
 
     for imp in impianti:
         if kw == imp["comune"]:
@@ -194,7 +223,8 @@ def _trova_pv_da_alias(alias: str, impianti: list[dict]) -> int | None:
         "BEATRICE": 48979, "REPUBBLICA": 43809, "MANTEGNA": 45531,
         "MALEO": 46273, "CREMONA": 48765, "MONTODINE": 43695,
         "MARMIROLO": 47832, "ROMANO": 43596, "SELVINO": 40297,
-        "ROVETTA": 42840, "BERGAMO": 45874, "TALEGGIO": 41010,
+        "ROVETTA": 42840, "BERGAMO": 45874, "GHISLANDI": 45874,
+        "TALEGGIO": 49788, "FAMAGOSTA": 45818,
         "PIOLTELLO": 43699,  # nota: ambiguo; prevale seggiano
     }
     for key, pv in HARDCODES.items():
@@ -222,19 +252,24 @@ def ingest_fortech(file_path: str, conn=None) -> int:
 
     count = 0
     params = [(r["codice_pv"], r["data"], r["contanti"], r["pos"],
-               r["buoni"], r["satispay"], r["petrolifere"]) for r in records]
-    
+               r["buoni"], r["satispay"], r["petrolifere"],
+               r.get("prove_erogazione", 0), r.get("clienti_fine_mese", 0), r.get("diversi", 0))
+              for r in records]
+
     conn.executemany('''
         INSERT INTO transazioni_fortech
             (codice_pv, data, totale_contante, totale_pos, totale_buoni,
-             totale_satispay, totale_petrolifere)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+             totale_satispay, totale_petrolifere, prove_erogazione, clienti_fine_mese, diversi)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(codice_pv, data) DO UPDATE SET
             totale_contante    = transazioni_fortech.totale_contante    + EXCLUDED.totale_contante,
             totale_pos         = transazioni_fortech.totale_pos         + EXCLUDED.totale_pos,
             totale_buoni       = transazioni_fortech.totale_buoni       + EXCLUDED.totale_buoni,
             totale_satispay    = transazioni_fortech.totale_satispay    + EXCLUDED.totale_satispay,
-            totale_petrolifere = transazioni_fortech.totale_petrolifere + EXCLUDED.totale_petrolifere
+            totale_petrolifere = transazioni_fortech.totale_petrolifere + EXCLUDED.totale_petrolifere,
+            prove_erogazione   = transazioni_fortech.prove_erogazione   + EXCLUDED.prove_erogazione,
+            clienti_fine_mese  = transazioni_fortech.clienti_fine_mese  + EXCLUDED.clienti_fine_mese,
+            diversi            = transazioni_fortech.diversi            + EXCLUDED.diversi
     ''', params)
     count = len(params)
 
@@ -242,89 +277,6 @@ def ingest_fortech(file_path: str, conn=None) -> int:
     if close:
         conn.close()
     print(f"  [OK] Fortech: {count} record da {os.path.basename(file_path)}")
-    return count
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  CONTANTI (AS400 / Doc Finance)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def ingest_contanti(file_path: str, conn=None) -> int:
-    """Legge un file Contanti (DocFinance/AS400) e popola transazioni_contanti."""
-    close = conn is None
-    if conn is None:
-        conn = get_connection()
-
-    df = _carica_excel(file_path)
-    if df is None or df.empty:
-        if close:
-            conn.close()
-        return 0
-
-    # Normalizza nomi colonne
-    col_data = col_importo = None
-    for col in df.columns:
-        cl = str(col).strip().lower()
-        if cl == "dt operaz.":
-            col_data = col
-        elif cl == "importo":
-            col_importo = col
-
-    if not col_data or not col_importo:
-        print(f"  [!] Colonne mancanti in {os.path.basename(file_path)}: Dt Operaz. o Importo")
-        if close:
-            conn.close()
-        return 0
-
-    df["_data"]    = pd.to_datetime(df[col_data], dayfirst=True, errors="coerce").dt.strftime("%Y-%m-%d")
-    df["_importo"] = pd.to_numeric(df[col_importo], errors="coerce").fillna(0.0)
-    df = df[df["_importo"] != 0.0].dropna(subset=["_data"])
-
-    ident_map = _build_ident_map(conn)
-
-    # Catturiamo tutte le colonne (escluse data/importo) per la ricerca keywords.
-    # Questo è più robusto rispetto al controllo del dtype 'object'.
-    exclude_cols = {col_data, col_importo, "_data", "_importo"}
-    text_cols = [c for c in df.columns if c not in exclude_cols]
-
-    count = 0
-    params = []
-    for _, row in df.iterrows():
-        # Concatena tutti i valori delle colonne di testo/metadati
-        all_text_parts = []
-        for c in text_cols:
-            val = str(row[c]).strip()
-            if val and val.lower() != "nan":
-                all_text_parts.append(val)
-        
-        all_text = " ".join(all_text_parts)
-        all_text_upper = all_text.upper()
-
-        codice_pv = None
-        for ident, pv in ident_map.items():
-            if ident and ident.upper() in all_text_upper:
-                codice_pv = pv
-                break
-        
-        # Fallback: ricerca hardcoded se il nome comune è presente nel testo
-        if codice_pv is None:
-            # REPUBBLICA (43809), MALEO (46273)
-            if "MALEO" in all_text_upper: codice_pv = 46273
-            elif "REPUBBLICA" in all_text_upper or "43809" in all_text_upper: codice_pv = 43809
-
-        params.append((row["_data"], codice_pv, row["_importo"], all_text[:1000]))
-
-    conn.executemany('''
-        INSERT INTO transazioni_contanti (data, codice_pv, importo, note_raw)
-        VALUES (?, ?, ?, ?)
-    ''', params)
-    count = len(params)
-
-    conn.commit()
-    if close:
-        conn.close()
-    trovati = sum(1 for _, r in df.iterrows() if r.get("_data"))
-    print(f"  [OK] Contanti: {count} righe da {os.path.basename(file_path)}")
     return count
 
 
@@ -338,7 +290,7 @@ def ingest_pos(file_path: str, conn=None) -> int:
     if conn is None:
         conn = get_connection()
 
-    # Trova la riga header cercando "Importo" e "Data e ora"
+    # Trova la riga header cercando "Importo"/"Data e ora" (Numia) o "Importo Transazioni" (alt)
     try:
         df_raw = _leggi_excel_multi_engine(file_path, header=None, nrows=15)
     except Exception as e:
@@ -354,6 +306,10 @@ def ingest_pos(file_path: str, conn=None) -> int:
     for i, row in df_raw.iterrows():
         vals = {str(v).strip().lower() for v in row.values if pd.notna(v)}
         if "importo" in vals and "data e ora" in vals:
+            header_row = i
+            break
+        # Formato alternativo Ghislandi/Rovetta/Taleggio
+        if "importo transazioni" in vals and "data operazione" in vals:
             header_row = i
             break
 
@@ -372,8 +328,11 @@ def ingest_pos(file_path: str, conn=None) -> int:
 
 
 
-    # Identifica colonne
+    # Identifica colonne — formato standard Numia
     col_importo = col_data = col_alias = col_circuito = None
+    # Formato alternativo Ghislandi/Rovetta/Taleggio (HTML Intesa)
+    col_importo_alt = col_data_alt = col_circuito_alt = col_pv_alt = None
+
     for c in df.columns:
         cl = str(c).strip().lower()
         if cl == "importo":
@@ -384,7 +343,48 @@ def ingest_pos(file_path: str, conn=None) -> int:
             col_alias = c
         elif cl == "circuito":
             col_circuito = c
+        elif cl == "importo transazioni":
+            col_importo_alt = c
+        elif cl == "data operazione":
+            col_data_alt = c
+        elif cl == "tipo carta":
+            col_circuito_alt = c
+        elif cl == "pv" and col_pv_alt is None:
+            col_pv_alt = c
 
+    # Formato alternativo: Data operazione + Importo Transazioni + PV diretto
+    if col_importo_alt and col_data_alt and col_pv_alt:
+        df["_data"]    = pd.to_datetime(df[col_data_alt], dayfirst=True, errors="coerce").dt.strftime("%Y-%m-%d")
+        df["_importo"] = pd.to_numeric(df[col_importo_alt], errors="coerce").fillna(0.0)
+        df = df[df["_importo"] != 0.0].dropna(subset=["_data"])
+
+        valid_pvs = {r[0] for r in conn.execute("SELECT codice_pv FROM impianti").fetchall()}
+        params = []
+        for _, row in df.iterrows():
+            pv_raw = str(row[col_pv_alt]).strip().lstrip("0")
+            try:
+                codice_pv = int(pv_raw) if pv_raw.isdigit() else None
+            except Exception:
+                codice_pv = None
+            if codice_pv not in valid_pvs:
+                codice_pv = None
+            # Usa codice_pv come alias per compatibilità con la colonna alias_terminale
+            alias    = str(codice_pv) if codice_pv else ""
+            circuito = str(row[col_circuito_alt]).strip() if col_circuito_alt else ""
+            params.append((row["_data"], alias, row["_importo"], circuito))
+
+        conn.executemany('''
+            INSERT INTO transazioni_pos (data, alias_terminale, importo, circuito)
+            VALUES (?, ?, ?, ?)
+        ''', params)
+        count = len(params)
+        conn.commit()
+        if close:
+            conn.close()
+        print(f"  [OK] POS/Carte (alt): {count} righe da {os.path.basename(file_path)}")
+        return count
+
+    # Formato standard
     if not col_importo or not col_data:
         print(f"  [!] Colonne mancanti in {os.path.basename(file_path)}")
         if close:
@@ -693,8 +693,8 @@ def ingest_folder(folder: str) -> dict:
 
     conn = get_connection()
 
-    # Svuota le tabelle reali (ma non fortech) per reimportare da zero
-    for tbl in ("transazioni_contanti", "transazioni_pos", "transazioni_satispay",
+    # Svuota le tabelle per reimportare da zero
+    for tbl in ("transazioni_pos", "transazioni_satispay",
                 "transazioni_buoni", "transazioni_petrolifere", "transazioni_fortech"):
         conn.execute(f"DELETE FROM {tbl} WHERE TRUE")
     conn.commit()
@@ -702,13 +702,12 @@ def ingest_folder(folder: str) -> dict:
     # Carica anagrafica impianti all'inizio
     ingest_impianti(conn)
 
-    summary = {"files_found": len(files), "FORTECH": 0, "CONTANTI": 0,
+    summary = {"files_found": len(files), "FORTECH": 0,
                "CARTE_BANCARIE": 0, "SATISPAY": 0, "BUONI": 0,
                "carte_petrolifere": 0, "ANAGRAFICA": 0, "SCONOSCIUTO": 0}
 
     handler = {
         "FORTECH":          ingest_fortech,
-        "CONTANTI":         ingest_contanti,
         "CARTE_BANCARIE":   ingest_pos,
         "SATISPAY":         ingest_satispay,
         "BUONI":            ingest_buoni,
@@ -716,15 +715,23 @@ def ingest_folder(folder: str) -> dict:
     }
 
     for fp in files:
-        info = identify_file_type(fp)
-        cat  = info["categoria"]
         fname = os.path.basename(fp)
-        print(f"  [{cat}] {fname} (conf: {info['confidenza']}%)")
+        try:
+            info = identify_file_type(fp)
+            cat  = info["categoria"]
+            print(f"  [{cat}] {fname} (conf: {info['confidenza']}%)")
 
-        if cat in handler:
-            n = handler[cat](fp, conn)
-            summary[cat] = summary.get(cat, 0) + n
-        else:
+            if cat in handler:
+                try:
+                    n = handler[cat](fp, conn)
+                    summary[cat] = summary.get(cat, 0) + n
+                except Exception as e:
+                    print(f"  [ERR] Errore elaborando {fname}: {e}")
+                    summary["SCONOSCIUTO"] = summary.get("SCONOSCIUTO", 0) + 1
+            else:
+                summary["SCONOSCIUTO"] = summary.get("SCONOSCIUTO", 0) + 1
+        except Exception as e:
+            print(f"  [ERR] Classificazione fallita per {fname}: {e}")
             summary["SCONOSCIUTO"] = summary.get("SCONOSCIUTO", 0) + 1
 
     conn.close()

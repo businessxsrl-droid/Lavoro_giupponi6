@@ -15,6 +15,11 @@ GROUND_TRUTH: dict[str, list[str]] = {
         "DKV", "BUONI", "CLIENTI CON FATTURA FINE MESE", "CARTA CREDITO GENERICA",
         "PAGOBANCOMAT", "MANCATO EROGATO", "CARTAMAXIMA", "UTA", "CARTAPETROLIFERA",
         "AMEX", "TBS", "PAGAMENTIINNOVATIVI",
+        # Formato corrispettivo per carburante (impianti GentoMarch)
+        "Corrispettivo Totale", "CorrispettivoVerde", "CorrispettivoDiesel",
+        "Fatture Postpagate Totale", "Buoni Totale",
+        # Formato senza servizio (Belfiore/Ghislandi/Marmirolo/Oltre il Colle/Rovetta/Famagosta)
+        "BANCOMAT", "CARTACREDITO",
     ],
     "CONTANTI": [
         "Gruppo", "Azienda", "Banca", "Rbn", "Desc. RBN", "Nr Conto Corr.",
@@ -43,6 +48,9 @@ GROUND_TRUTH: dict[str, list[str]] = {
         "Importo in valuta originale", "Valuta originale", "Importo Cashback",
         "Punto vendita", "ID Punto vendita", "MID", "ID Terminale / TML",
         "Alias Terminale", "ID Transazione", "Codice ordine",
+        # Formato alternativo Ghislandi/Rovetta/Taleggio (HTML Intesa)
+        "Data operazione", "Ora operazione", "Numero Scontrino",
+        "Tipo Carta", "Importo Transazioni", "Mittente",
     ],
     "carte_petrolifere": [
         "Gestore", "PV", "Dataoperazione", "Oraoperazione", "Circuito",
@@ -162,6 +170,13 @@ def identify_file_type(file_path: str) -> dict:
                     conf = 100.0
                 if category in ("SATISPAY", "carte_petrolifere", "ANAGRAFICA") and matches >= 3:
                     conf = 100.0
+                # CARTE_BANCARIE: boost solo se presente colonna univoca (non condivisa con petrolifere)
+                if category == "CARTE_BANCARIE" and matches >= 3:
+                    unique_bancarie = {"aliasterminale", "importotransazioni", "tipocarta",
+                                       "dataeeora", "idpuntovendita", "midterminale",
+                                       "numeroscontrino", "mittente"}
+                    if any(h in row_vals for h in unique_bancarie):
+                        conf = 100.0
 
                 if conf > best_conf:
                     best_conf   = conf
@@ -183,9 +198,13 @@ def identify_file_type(file_path: str) -> dict:
 # ── Lettura totali Fortech ────────────────────────────────────────────────────
 
 _FORTECH_MAPPING = {
+    # Formato standard: BANCOMAT GESTORE, CARTA CREDITO GESTORE, ...
+    # Formato senza servizio (Belfiore/Ghislandi/Marmirolo/Oltre il Colle/Rovetta/Famagosta): BANCOMAT, CARTACREDITO
     "pos":          ["BANCOMAT GESTORE", "CARTA CREDITO GESTORE", "AMEX",
-                     "CARTA CREDITO GENERICA", "PAGOBANCOMAT", "TBS"],
+                     "CARTA CREDITO GENERICA", "PAGOBANCOMAT", "TBS",
+                     "BANCOMAT", "CARTACREDITO"],
     "petrolifere":  ["DKV", "UTA", "CARTAMAXIMA"],
+    # CARTAPETROLIFERA: nei senza servizio contiene sia buoni sia petrolifere (combinati)
     "buoni":        ["BUONI", "CARTAPETROLIFERA"],
     "satispay":     ["PAGAMENTIINNOVATIVI"],
     "contanti":     ["CONTANTI"],
@@ -209,11 +228,34 @@ def get_fortech_records(file_path: str) -> list[dict] | None:
         df = df.dropna(subset=["DataContabile"])
         df["DataContabile"] = df["DataContabile"].dt.strftime("%Y-%m-%d")
 
-        # Converti colonne numeriche
+        # Converti colonne numeriche — FORTECH_MAPPING standard
         all_cols = [c for cols in _FORTECH_MAPPING.values() for c in cols]
         for col in all_cols:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+
+        # Pre-calcola colonne display-only — supporta sia formato incassi sia corrispettivo
+        # Prove di erogazione: formato incassi → 'PROVE EROGAZIONE'
+        #                      formato corrispettivo → 'ImportoXxxProve Erogazione'
+        prove_cols = []
+        if "PROVE EROGAZIONE" in df.columns:
+            prove_cols = ["PROVE EROGAZIONE"]
+        else:
+            prove_cols = [c for c in df.columns if "Prove Erogazione" in str(c) and str(c).startswith("Importo")]
+
+        # Clienti con fattura fine mese: formato incassi → 'CLIENTI CON FATTURA FINE MESE'
+        #                                formato corrispettivo → 'Fatture Postpagate Totale'
+        fm_col = None
+        for candidate in ("CLIENTI CON FATTURA FINE MESE", "Fatture Postpagate Totale"):
+            if candidate in df.columns:
+                fm_col = candidate
+                break
+
+        # Diversi: colonna 'DIVERSI' o 'Diversi' (da entrambi i formati)
+        diversi_col = next((c for c in df.columns if str(c).strip().upper() == "DIVERSI"), None)
+
+        for col in prove_cols + ([fm_col] if fm_col else []) + ([diversi_col] if diversi_col else []):
+            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
 
         records = []
         for (pv, data), grp in df.groupby(["CodicePV", "DataContabile"]):
@@ -221,6 +263,12 @@ def get_fortech_records(file_path: str) -> list[dict] | None:
             for cat, cols in _FORTECH_MAPPING.items():
                 present = [c for c in cols if c in df.columns]
                 rec[cat] = round(float(grp[present].sum().sum()) if present else 0.0, 2)
+
+            # Colonne display-only
+            rec["prove_erogazione"]  = round(float(grp[prove_cols].sum().sum()) if prove_cols else 0.0, 2)
+            rec["clienti_fine_mese"] = round(float(grp[fm_col].sum())           if fm_col     else 0.0, 2)
+            rec["diversi"]           = round(float(grp[diversi_col].sum())       if diversi_col else 0.0, 2)
+
             records.append(rec)
 
         return records
