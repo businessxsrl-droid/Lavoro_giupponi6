@@ -231,7 +231,10 @@ class PostgresConnection:
 def get_connection():
     db_url = os.getenv("DATABASE_URL")
     if db_url and db_url.startswith("postgres"):
-        return PostgresConnection(db_url)
+        try:
+            return PostgresConnection(db_url)
+        except Exception as e:
+            print(f"[DB] DATABASE_URL non raggiungibile ({e}), uso Supabase.")
     return SupabaseConnection()
 
 def init_db():
