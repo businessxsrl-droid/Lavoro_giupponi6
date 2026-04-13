@@ -340,7 +340,7 @@ def ingest_pos(file_path: str, conn=None) -> int:
     # Identifica colonne — formato standard Numia
     col_importo = col_data = col_alias = col_circuito = None
     # Formato alternativo Ghislandi/Rovetta/Taleggio (HTML Intesa)
-    col_importo_alt = col_data_alt = col_circuito_alt = col_pv_alt = None
+    col_importo_alt = col_data_alt = col_circuito_alt = col_pv_alt = col_mittente_alt = None
 
     for c in df.columns:
         cl = str(c).strip().lower()
@@ -360,28 +360,50 @@ def ingest_pos(file_path: str, conn=None) -> int:
             col_circuito_alt = c
         elif cl == "pv" and col_pv_alt is None:
             col_pv_alt = c
+        elif cl == "mittente":
+            col_mittente_alt = c
 
-    # Formato alternativo: Data operazione + Importo Transazioni + PV diretto
-    if col_importo_alt and col_data_alt and col_pv_alt:
+    # Formato alternativo: Data operazione + Importo Transazioni (PV opzionale)
+    # Gestisce file Ghislandi/Rovetta/Taleggio che non hanno colonna PV
+    if col_importo_alt and col_data_alt:
         df["_data"]    = pd.to_datetime(df[col_data_alt], dayfirst=True, errors="coerce").dt.strftime("%Y-%m-%d")
         df["_importo"] = pd.to_numeric(df[col_importo_alt], errors="coerce").fillna(0.0)
         df = df[df["_importo"] != 0.0].dropna(subset=["_data"])
 
         valid_pvs = {r[0] for r in conn.execute("SELECT codice_pv FROM impianti").fetchall()}
+
+        # Se non c'è colonna PV, prova a ricavare l'impianto dal nome del file
+        impianti_list = _build_alias_to_pv(conn)
+        pv_from_filename = _trova_pv_da_alias(os.path.basename(file_path), impianti_list)
+
         params = []
         for _, row in df.iterrows():
-            pv_raw = str(row[col_pv_alt]).strip().lstrip("0")
-            try:
-                codice_pv = int(pv_raw) if pv_raw.isdigit() else None
-            except Exception:
-                codice_pv = None
-            if codice_pv not in valid_pvs:
-                codice_pv = None
+            codice_pv = None
+
+            if col_pv_alt:
+                pv_raw = str(row[col_pv_alt]).strip().lstrip("0")
+                try:
+                    codice_pv = int(pv_raw) if pv_raw.isdigit() else None
+                except Exception:
+                    codice_pv = None
+                if codice_pv not in valid_pvs:
+                    codice_pv = None
+
+            # Fallback: PV dal nome file
+            if codice_pv is None:
+                codice_pv = pv_from_filename
+
+            # Fallback: PV dalla colonna Mittente
+            if codice_pv is None and col_mittente_alt:
+                mittente = str(row[col_mittente_alt]).strip()
+                codice_pv = _trova_pv_da_alias(mittente, impianti_list)
+
             # Usa codice_pv come alias per compatibilità con la colonna alias_terminale
             alias    = str(codice_pv) if codice_pv else ""
             circuito = str(row[col_circuito_alt]).strip() if col_circuito_alt else ""
             params.append((row["_data"], alias, row["_importo"], circuito))
 
+        print(f"  [INFO] POS alt: pv_da_file={pv_from_filename}, col_pv={col_pv_alt}, col_mittente={col_mittente_alt}")
         _delete_by_dates(conn, "transazioni_pos", {p[0] for p in params})
         conn.executemany('''
             INSERT INTO transazioni_pos (data, alias_terminale, importo, circuito)
