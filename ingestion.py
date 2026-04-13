@@ -106,12 +106,21 @@ def _load_alias_mapping(path: str) -> list[dict]:
         return []
 
 
-def _delete_by_dates(conn, table: str, dates):
-    """Cancella le righe della tabella per le date specificate (rimpiazzo per data)."""
+def _delete_by_dates(conn, table: str, dates, aliases=None):
+    """Cancella le righe della tabella per le date specificate.
+    Se aliases è fornito (solo per transazioni_pos), filtra anche per alias_terminale
+    così file diversi sulle stesse date non si sovrascrivono a vicenda.
+    """
     dates = {d for d in dates if d and str(d) != "nan"}
     if not dates:
         return
     date_list = ", ".join(f"'{d}'" for d in sorted(dates))
+    if aliases is not None:
+        clean = {str(a) for a in aliases if a and str(a) not in ("None", "nan", "")}
+        if clean:
+            alias_list = ", ".join(f"'{a}'" for a in sorted(clean))
+            conn.execute(f"DELETE FROM {table} WHERE data IN ({date_list}) AND alias_terminale IN ({alias_list})")
+            return
     conn.execute(f"DELETE FROM {table} WHERE data IN ({date_list})")
 
 
@@ -408,7 +417,7 @@ def ingest_pos(file_path: str, conn=None) -> int:
             params.append((row["_data"], alias, row["_importo"], circuito))
 
         print(f"  [INFO] POS alt: pv_da_file={pv_from_filename}, col_pv={col_pv_alt}, col_mittente={col_mittente_alt}")
-        _delete_by_dates(conn, "transazioni_pos", {p[0] for p in params})
+        _delete_by_dates(conn, "transazioni_pos", {p[0] for p in params}, aliases={p[1] for p in params})
         conn.executemany('''
             INSERT INTO transazioni_pos (data, alias_terminale, importo, circuito)
             VALUES (?, ?, ?, ?)
@@ -437,7 +446,7 @@ def ingest_pos(file_path: str, conn=None) -> int:
         circuito = str(row[col_circuito]).strip() if col_circuito else ""
         params.append((row["_data"], alias, row["_importo"], circuito))
 
-    _delete_by_dates(conn, "transazioni_pos", {p[0] for p in params})
+    _delete_by_dates(conn, "transazioni_pos", {p[0] for p in params}, aliases={p[1] for p in params})
     conn.executemany('''
         INSERT INTO transazioni_pos (data, alias_terminale, importo, circuito)
         VALUES (?, ?, ?, ?)
