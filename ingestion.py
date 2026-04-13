@@ -106,6 +106,15 @@ def _load_alias_mapping(path: str) -> list[dict]:
         return []
 
 
+def _delete_by_dates(conn, table: str, dates):
+    """Cancella le righe della tabella per le date specificate (rimpiazzo per data)."""
+    dates = {d for d in dates if d and str(d) != "nan"}
+    if not dates:
+        return
+    date_list = ", ".join(f"'{d}'" for d in sorted(dates))
+    conn.execute(f"DELETE FROM {table} WHERE data IN ({date_list})")
+
+
 def ingest_impianti(conn=None) -> int:
     """
     Popola la tabella impianti da Elenco impianti.xlsx + alias_mapping.json.
@@ -262,14 +271,14 @@ def ingest_fortech(file_path: str, conn=None) -> int:
              totale_satispay, totale_petrolifere, prove_erogazione, clienti_fine_mese, diversi)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(codice_pv, data) DO UPDATE SET
-            totale_contante    = transazioni_fortech.totale_contante    + EXCLUDED.totale_contante,
-            totale_pos         = transazioni_fortech.totale_pos         + EXCLUDED.totale_pos,
-            totale_buoni       = transazioni_fortech.totale_buoni       + EXCLUDED.totale_buoni,
-            totale_satispay    = transazioni_fortech.totale_satispay    + EXCLUDED.totale_satispay,
-            totale_petrolifere = transazioni_fortech.totale_petrolifere + EXCLUDED.totale_petrolifere,
-            prove_erogazione   = transazioni_fortech.prove_erogazione   + EXCLUDED.prove_erogazione,
-            clienti_fine_mese  = transazioni_fortech.clienti_fine_mese  + EXCLUDED.clienti_fine_mese,
-            diversi            = transazioni_fortech.diversi            + EXCLUDED.diversi
+            totale_contante    = EXCLUDED.totale_contante,
+            totale_pos         = EXCLUDED.totale_pos,
+            totale_buoni       = EXCLUDED.totale_buoni,
+            totale_satispay    = EXCLUDED.totale_satispay,
+            totale_petrolifere = EXCLUDED.totale_petrolifere,
+            prove_erogazione   = EXCLUDED.prove_erogazione,
+            clienti_fine_mese  = EXCLUDED.clienti_fine_mese,
+            diversi            = EXCLUDED.diversi
     ''', params)
     count = len(params)
 
@@ -373,6 +382,7 @@ def ingest_pos(file_path: str, conn=None) -> int:
             circuito = str(row[col_circuito_alt]).strip() if col_circuito_alt else ""
             params.append((row["_data"], alias, row["_importo"], circuito))
 
+        _delete_by_dates(conn, "transazioni_pos", {p[0] for p in params})
         conn.executemany('''
             INSERT INTO transazioni_pos (data, alias_terminale, importo, circuito)
             VALUES (?, ?, ?, ?)
@@ -401,6 +411,7 @@ def ingest_pos(file_path: str, conn=None) -> int:
         circuito = str(row[col_circuito]).strip() if col_circuito else ""
         params.append((row["_data"], alias, row["_importo"], circuito))
 
+    _delete_by_dates(conn, "transazioni_pos", {p[0] for p in params})
     conn.executemany('''
         INSERT INTO transazioni_pos (data, alias_terminale, importo, circuito)
         VALUES (?, ?, ?, ?)
@@ -464,6 +475,7 @@ def ingest_satispay(file_path: str, conn=None) -> int:
                     break
         params.append((row["_data"], codice_pv, row["_importo"]))
 
+    _delete_by_dates(conn, "transazioni_satispay", {p[0] for p in params})
     conn.executemany('''
         INSERT INTO transazioni_satispay (data, codice_pv, importo)
         VALUES (?, ?, ?)
@@ -562,6 +574,7 @@ def ingest_buoni(file_path: str, conn=None) -> int:
 
         params.append((row["_data"], codice_pv, row["_importo"], esercente))
 
+    _delete_by_dates(conn, "transazioni_buoni", {p[0] for p in params})
     conn.executemany('''
         INSERT INTO transazioni_buoni (data, codice_pv, importo, esercente)
         VALUES (?, ?, ?, ?)
@@ -660,6 +673,7 @@ def ingest_petrolifere(file_path: str, conn=None) -> int:
 
         params.append((row["_data"], codice_pv, importo))
 
+    _delete_by_dates(conn, "transazioni_petrolifere", {p[0] for p in params})
     conn.executemany('''
         INSERT INTO transazioni_petrolifere (data, codice_pv, importo)
         VALUES (?, ?, ?)
@@ -692,12 +706,6 @@ def ingest_folder(folder: str) -> dict:
         return {"files_found": 0}
 
     conn = get_connection()
-
-    # Svuota le tabelle per reimportare da zero
-    for tbl in ("transazioni_pos", "transazioni_satispay",
-                "transazioni_buoni", "transazioni_petrolifere", "transazioni_fortech"):
-        conn.execute(f"DELETE FROM {tbl} WHERE TRUE")
-    conn.commit()
 
     # Carica anagrafica impianti all'inizio
     ingest_impianti(conn)
