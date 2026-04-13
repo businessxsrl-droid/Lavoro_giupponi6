@@ -148,7 +148,7 @@ def identify_file_type(file_path: str) -> dict:
 
         for idx, row in df_head.iterrows():
             row_vals = [
-                str(v).replace(" ", "").lower()
+                str(v).replace(" ", "").replace("\n", "").replace("\r", "").lower()
                 for v in row.values
                 if pd.notna(v) and str(v).strip()
             ]

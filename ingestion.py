@@ -343,7 +343,9 @@ def ingest_pos(file_path: str, conn=None) -> int:
     col_importo_alt = col_data_alt = col_circuito_alt = col_pv_alt = col_mittente_alt = None
 
     for c in df.columns:
-        cl = str(c).strip().lower()
+        # Normalizza: rimuove newline, spazi extra, lowercase
+        cl = str(c).strip().replace("\n", " ").replace("\r", "").lower()
+        cl = " ".join(cl.split())  # collassa spazi multipli
         if cl == "importo":
             col_importo = c
         elif cl == "data e ora":
@@ -362,6 +364,8 @@ def ingest_pos(file_path: str, conn=None) -> int:
             col_pv_alt = c
         elif cl == "mittente":
             col_mittente_alt = c
+
+    print(f"  [DEBUG POS] Colonne: {[repr(str(c)) for c in df.columns]}")
 
     # Formato alternativo: Data operazione + Importo Transazioni (PV opzionale)
     # Gestisce file Ghislandi/Rovetta/Taleggio che non hanno colonna PV
