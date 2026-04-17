@@ -476,7 +476,7 @@ def ingest_satispay(file_path: str, conn=None) -> int:
             conn.close()
         return 0
 
-    col_importo = col_data = col_negozio = None
+    col_importo = col_data = col_negozio = col_tipo = None
     for c in df.columns:
         cl = str(c).strip().lower()
         if cl == "importo totale":
@@ -485,6 +485,17 @@ def ingest_satispay(file_path: str, conn=None) -> int:
             col_data = c
         elif cl == "codice negozio":
             col_negozio = c
+        elif cl == "tipo transazione":
+            col_tipo = c
+
+    # Filtra storni, rimborsi e transazioni rifiutate/annullate
+    if col_tipo is not None:
+        _TIPI_DA_ESCLUDERE = {"REFUND_TO_BUSINESS", "REFUND", "REJECTED", "CANCELED", "CANCELLED", "STORNO", "RIMBORSO"}
+        mask = df[col_tipo].astype(str).str.strip().str.upper().isin(_TIPI_DA_ESCLUDERE)
+        escluse = mask.sum()
+        if escluse:
+            print(f"  [i] Satispay: {escluse} righe escluse (storni/rimborsi/rifiutate)")
+        df = df[~mask]
 
     if not col_importo or not col_data:
         print(f"  [!] Colonne mancanti Satispay in {os.path.basename(file_path)}")
