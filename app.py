@@ -406,10 +406,14 @@ def export_excel():
 
     query  = '''
         SELECT r.data, i.nome AS impianto, r.categoria,
-               r.valore_teorico, r.valore_reale, r.differenza, r.stato, r.note, r.tipo_match
+               r.valore_teorico, r.valore_reale, r.differenza, r.stato, r.note, r.tipo_match,
+               COALESCE(f.prove_erogazione, 0)  AS prove_erogazione,
+               COALESCE(f.clienti_fine_mese, 0) AS clienti_fine_mese,
+               COALESCE(f.diversi, 0)            AS diversi
 
         FROM riconciliazione_risultati r
         LEFT JOIN impianti i ON r.codice_pv = i.codice_pv
+        LEFT JOIN transazioni_fortech f ON f.codice_pv = r.codice_pv AND f.data = r.data
         WHERE 1=1
     '''
     params = []
@@ -429,7 +433,8 @@ def export_excel():
     conn.close()
 
     cols = ["data", "impianto", "categoria", "valore_teorico", "valore_reale",
-            "differenza", "stato", "note", "tipo_match"]
+            "differenza", "stato", "note", "tipo_match",
+            "prove_erogazione", "clienti_fine_mese", "diversi"]
     df = pd.DataFrame([dict(r) for r in rows], columns=cols) if rows else pd.DataFrame(columns=cols)
 
     df.rename(columns={
@@ -437,6 +442,9 @@ def export_excel():
         "valore_teorico": "Fortech (€)", "valore_reale": "Reale (€)",
         "differenza": "Diff (€)", "stato": "Stato", "note": "Note",
         "tipo_match": "Tipo Match",
+        "prove_erogazione": "Prove di erogazione (€)",
+        "clienti_fine_mese": "Clienti con fattura fine mese (€)",
+        "diversi": "Diversi (€)",
     }, inplace=True)
 
     buf = io.BytesIO()
