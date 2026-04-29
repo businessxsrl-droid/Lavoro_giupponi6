@@ -586,9 +586,6 @@ async function loadRiconciliazioni() {
                                 <th style="width: 120px; text-align: right;">Reale (€)</th>
                                 <th style="width: 120px; text-align: right;">Diff (€)</th>
                                 <th style="width: 130px;">Stato</th>
-                                <th style="width: 110px; text-align: right;" title="Prove di erogazione (solo visualizzazione)">Prove eron. (€)</th>
-                                <th style="width: 110px; text-align: right;" title="Clienti con fatturazione a fine mese (solo visualizzazione)">Cli. fine mese (€)</th>
-                                <th style="width: 90px; text-align: right;" title="Diversi (solo visualizzazione)">Diversi (€)</th>
                                 <th style="width: 200px;">Note</th>
                                 <th style="width: 70px; text-align: center;">Azioni</th>
                             </tr>
@@ -611,11 +608,6 @@ async function loadRiconciliazioni() {
                                         ${r.tipo_match && r.tipo_match !== 'nessuno' ? `<span style="margin-left:5px; cursor:help;" title="${TIPO_MATCH_LABELS[r.tipo_match]?.label || r.tipo_match}">${TIPO_MATCH_LABELS[r.tipo_match]?.icon || ''}</span>` : ''}
                                     </td>
 
-                                    
-                                    <td style="text-align: right; color: var(--text-secondary); font-size: 12px;">${r.prove_erogazione > 0 ? renderMoney(r.prove_erogazione) : '—'}</td>
-                                    <td style="text-align: right; color: var(--text-secondary); font-size: 12px;">${r.clienti_fine_mese > 0 ? renderMoney(r.clienti_fine_mese) : '—'}</td>
-                                    <td style="text-align: right; color: var(--text-secondary); font-size: 12px;">${r.diversi > 0 ? renderMoney(r.diversi) : '—'}</td>
-
                                     <td style="font-size: 11px; color: var(--text-secondary); line-height: 1.4;">
                                         <span class="val-note-text" id="note-txt-${r.id}">${r.note || ''}</span>
                                         <input type="text" class="edit-input edit-note" id="note-inp-${r.id}" value="${r.note || ''}" style="display:none; width:100%">
@@ -626,6 +618,58 @@ async function loadRiconciliazioni() {
                                         <button class="btn-action btn-save" id="btn-save-${r.id}" onclick="salvaModificheRic(${r.id})" style="display:none" title="Salva">💾</button>
                                         <button class="btn-action btn-cancel" id="btn-cancel-${r.id}" onclick="toggleEditRic(${r.id})" style="display:none" title="Annulla">❌</button>
                                     </td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        `;
+    }
+
+    // ── Sezione unificata: Clienti Fine Mese / Prove Erogazione / Diversi ──
+    const infoRows = [];
+    const seenKeys = new Set();
+    for (const r of data) {
+        const key = `${r.data}__${r.impianto}`;
+        if (!seenKeys.has(key) && (r.prove_erogazione > 0 || r.clienti_fine_mese > 0 || r.diversi > 0)) {
+            seenKeys.add(key);
+            infoRows.push(r);
+        }
+    }
+
+    if (infoRows.length > 0) {
+        html += `
+        <div class="category-section" id="section-info-extra">
+            <h4 style="margin: 30px 0 10px 0; color: var(--text-primary); border-bottom: 2px solid var(--border-color); padding-bottom: 8px; display: flex; align-items: center; justify-content: space-between;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="color: #e3b341;">●</span> Clienti Fine Mese / Prove Erogazione / Diversi
+                </div>
+                <button class="btn-toggle-section" onclick="toggleSection('wrapper-info-extra', this)" title="Nascondi/Mostra">
+                    👁️
+                </button>
+            </h4>
+            <div class="collapsible-wrapper" id="wrapper-info-extra">
+                <div class="table-container" style="margin-bottom: 20px; max-height: 400px; overflow-y: auto;">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th style="width: 120px;">Data</th>
+                                <th>Impianto</th>
+                                <th style="width: 160px; text-align: right;" title="Prove di erogazione">Prove Erogazione (€)</th>
+                                <th style="width: 170px; text-align: right;" title="Clienti con fatturazione a fine mese">Clienti Fine Mese (€)</th>
+                                <th style="width: 120px; text-align: right;">Diversi (€)</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${infoRows.map(r => `
+                                <tr>
+                                    <td>${r.data || '—'}</td>
+                                    <td style="font-weight: 500;">${r.impianto || '—'}</td>
+                                    <td style="text-align: right;">${r.prove_erogazione > 0 ? renderMoney(r.prove_erogazione) : '—'}</td>
+                                    <td style="text-align: right;">${r.clienti_fine_mese > 0 ? renderMoney(r.clienti_fine_mese) : '—'}</td>
+                                    <td style="text-align: right;">${r.diversi > 0 ? renderMoney(r.diversi) : '—'}</td>
                                 </tr>
                             `).join('')}
                         </tbody>
