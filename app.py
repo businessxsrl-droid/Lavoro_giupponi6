@@ -408,30 +408,47 @@ def export_excel():
     query = """
         SELECT r.data, i.nome AS impianto, r.codice_pv,
                r.categoria,
-               r.valore_teorico, r.valore_reale, r.differenza, r.stato, r.note, r.tipo_match,
-               COALESCE(f.prove_erogazione, 0) AS prove_erogazione,
-               COALESCE(f.clienti_fine_mese, 0) AS clienti_fine_mese,
-               COALESCE(f.diversi, 0) AS diversi
+               r.valore_teorico, r.valore_reale, r.differenza, r.stato, r.note, r.tipo_match
         FROM riconciliazione_risultati r
         LEFT JOIN impianti i ON r.codice_pv = i.codice_pv
-        LEFT JOIN transazioni_fortech f ON r.codice_pv = f.codice_pv AND r.data = f.data
         WHERE 1=1
     """
     params = []
+    
+    query_f = """
+        SELECT data, codice_pv, 
+               COALESCE(prove_erogazione, 0) AS prove_erogazione,
+               COALESCE(clienti_fine_mese, 0) AS clienti_fine_mese,
+               COALESCE(diversi, 0) AS diversi
+        FROM transazioni_fortech
+        WHERE 1=1
+    """
+    params_f = []
+
     if da:
         query += " AND r.data >= ?"
+        query_f += " AND data >= ?"
         params.append(da)
+        params_f.append(da)
     if a:
         query += " AND r.data <= ?"
+        query_f += " AND data <= ?"
         params.append(a)
+        params_f.append(a)
     if pv:
         query += " AND r.codice_pv = ?"
+        query_f += " AND codice_pv = ?"
         params.append(int(pv))
+        params_f.append(int(pv))
+        
     query += " ORDER BY r.data DESC, i.nome, r.categoria"
 
     conn = get_connection()
     rows = conn.execute(query, params).fetchall()
+    f_rows = conn.execute(query_f, params_f).fetchall()
     conn.close()
+
+    f_map = { (f["data"], f["codice_pv"]): dict(f) if hasattr(f, 'keys') else f for f in f_rows }
 
     _CAT_LABEL = {
         "carte_bancarie":             "Carte bancarie (POS)",
@@ -455,6 +472,8 @@ def export_excel():
         if r["categoria"] in ("prove_erogazione", "clienti_fine_mese", "diversi"):
             continue
             
+        f_data = f_map.get((r["data"], r["codice_pv"]), {})
+            
         records.append({
             "data":      r["data"],
             "impianto":  f"{r['codice_pv']} - {r['impianto'] or 'N/D'}",
@@ -465,14 +484,15 @@ def export_excel():
             "stato_raw": r["stato"] or "",
             "stato":     _STATO_LABEL.get(r["stato"] or "", r["stato"] or ""),
             "note":      r["note"] or "",
-            "prove":     float(r["prove_erogazione"] or 0),
-            "clienti":   float(r["clienti_fine_mese"] or 0),
-            "diversi":   float(r["diversi"] or 0),
+            "prove":     float(f_data.get("prove_erogazione") or 0),
+            "clienti":   float(f_data.get("clienti_fine_mese") or 0),
+            "diversi":   float(f_data.get("diversi") or 0),
         })
 
     import openpyxl
     from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
     from openpyxl.utils import get_column_letter
+    from openpyxl.worksheet.cell_range import CellRange
     from itertools import groupby as _groupby
     import datetime
 
@@ -498,6 +518,8 @@ def export_excel():
     _FONT_TOT      = Font(bold=True, color="FFFFFF", size=10, name="Calibri")
     _AL_CTR  = Alignment(horizontal="center", vertical="center")
     _AL_LEFT = Alignment(horizontal="left",   vertical="center")
+    _AL_CTR_WRAP  = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    _AL_LEFT_WRAP = Alignment(horizontal="left",   vertical="center", wrap_text=True)
 
     HEADERS    = ["Data", "Impianto", "Categoria",
                   "Fortech (EUR)", "Reale (EUR)", "Diff (EUR)", "Stato", 
@@ -596,14 +618,14 @@ def export_excel():
 
         if n > 1:
             for ci in [1, 2, 8, 9, 10]:
-                ws.merge_cells(start_row=first, start_column=ci,
-                               end_row=last,    end_column=ci)
+                rng = CellRange(min_col=ci, min_row=first, max_col=ci, max_row=last)
+                ws.merged_cells.ranges.append(rng)
             
             # Restore alignments for merged cells
-            ws.cell(row=first, column=1).alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-            ws.cell(row=first, column=2).alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+            ws.cell(row=first, column=1).alignment = _AL_CTR_WRAP
+            ws.cell(row=first, column=2).alignment = _AL_LEFT_WRAP
             for ci in [8, 9, 10]:
-                ws.cell(row=first, column=ci).alignment = Alignment(horizontal="center", vertical="center")
+                ws.cell(row=first, column=ci).alignment = _AL_CTR
 
         if grp_idx > 1:
             for ci in range(1, NUM_COLS + 1):
