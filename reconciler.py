@@ -200,8 +200,10 @@ def _reconcile_satispay(conn, df_f: pd.DataFrame, tol: float) -> int:
 
 def _reconcile_buoni(conn, df_f: pd.DataFrame, tol: float, exclude_pvs: set = None) -> int:
     """Riconcilia i buoni/voucher (iP Portal) vs Fortech.
-    Teorico = totale_buoni (= BUONI + CARTAPETROLIFERA dal Fortech).
-    Reale   = somma Importo dal file iPortal, raggruppato per data e codice PV (ultimi 5 cifre).
+    Teorico = totale_buoni + prove_erogazione + clienti_fine_mese + diversi.
+    Questi ultimi tre campi fanno parte dello stesso flusso iPortal e vengono
+    sommati al buoni per evitare righe duplicate per impianto nello stesso giorno.
+    Reale   = somma Importo dal file iPortal, raggruppato per data e codice PV.
     exclude_pvs: impianti senza servizio (gestiti da _reconcile_buoni_petrolifere_combined).
     """
     cols = ["codice_pv", "data", "reale"]
@@ -211,7 +213,19 @@ def _reconcile_buoni(conn, df_f: pd.DataFrame, tol: float, exclude_pvs: set = No
         "GROUP BY codice_pv, data", cols)
 
     df_src = df_f[~df_f["codice_pv"].isin(exclude_pvs)].copy() if exclude_pvs else df_f.copy()
-    m = df_src[["codice_pv", "data", "totale_buoni"]].copy()
+
+    # Colonne extra: prove_erogazione, clienti_fine_mese, diversi (se presenti nel Fortech)
+    extra_cols = [c for c in ("prove_erogazione", "clienti_fine_mese", "diversi") if c in df_src.columns]
+    sel_cols   = ["codice_pv", "data", "totale_buoni"] + extra_cols
+    m = df_src[sel_cols].copy()
+    for c in extra_cols:
+        m[c] = pd.to_numeric(m[c], errors="coerce").fillna(0.0)
+
+    # Teorico = buoni + prove_erogazione + clienti_fine_mese + diversi
+    m["teorico"] = m["totale_buoni"].astype(float)
+    for c in extra_cols:
+        m["teorico"] += m[c]
+
     if not df_reale.empty:
         m = m.merge(df_reale, on=["codice_pv", "data"], how="left")
     else:
@@ -220,18 +234,23 @@ def _reconcile_buoni(conn, df_f: pd.DataFrame, tol: float, exclude_pvs: set = No
 
     params = []
     for _, row in m.iterrows():
-        teorico = float(row["totale_buoni"])
+        teorico = float(row["teorico"])
         reale   = float(row["reale"])
         stato   = _calcola_stato(teorico, reale, tol)
         if stato:
             diff = round(reale - teorico, 2)
-            params.append((int(row["codice_pv"]), row["data"], "buoni", teorico, reale, diff, stato, "nessuno", ""))
+            # Nota nel campo note: mostra il dettaglio dei componenti
+            extra_note = ", ".join(
+                f"{c.replace('_', ' ').title()}={float(row[c]):.2f}"
+                for c in extra_cols if float(row.get(c, 0)) != 0
+            )
+            note = f"[{extra_note}]" if extra_note else ""
+            params.append((int(row["codice_pv"]), row["data"], "buoni",
+                           teorico, reale, diff, stato, "nessuno", note))
 
-
-    
     conn.executemany(_SQL_UPSERT, params)
     count = len(params)
-    print(f"  [buoni]         {count} record")
+    print(f"  [buoni]         {count} record (incl. prove_erogazione/clienti_fine_mese/diversi)")
     return count
 
 
@@ -240,14 +259,19 @@ def _reconcile_buoni(conn, df_f: pd.DataFrame, tol: float, exclude_pvs: set = No
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _reconcile_buoni_petrolifere_combined(conn, df_f: pd.DataFrame, tol: float, pvs: set) -> int:
-    """Per impianti senza servizio: reconcilia buoni+petrolifere come unica categoria."""
+    """Per impianti senza servizio: reconcilia buoni+petrolifere come unica categoria.
+    Include anche prove_erogazione, clienti_fine_mese e diversi nel teorico.
+    """
     if not pvs:
         return 0
     df_ss = df_f[df_f["codice_pv"].isin(pvs)].copy()
     if df_ss.empty:
         return 0
 
+    extra_cols = [c for c in ("prove_erogazione", "clienti_fine_mese", "diversi") if c in df_ss.columns]
     df_ss["teorico"] = df_ss["totale_buoni"] + df_ss["totale_petrolifere"]
+    for c in extra_cols:
+        df_ss["teorico"] += pd.to_numeric(df_ss[c], errors="coerce").fillna(0.0)
 
     cols = ["codice_pv", "data", "reale"]
     df_buoni = _to_df(conn,
@@ -429,10 +453,10 @@ def reconcile(conn=None) -> int:
     except Exception as e:
         print(f"  [ERR] buoni_petrolifere_combined: {e}")
 
-    try:
-        inserted += _reconcile_informative(conn, df_f)
-    except Exception as e:
-        print(f"  [ERR] informative: {e}")
+    # NOTA: prove_erogazione, clienti_fine_mese, diversi sono inclusi
+    # nel teorico di _reconcile_buoni e _reconcile_buoni_petrolifere_combined.
+    # Non vengono più inseriti come categorie separate per evitare duplicati.
+
 
     conn.commit()
     print(f"[reconcile] Totale inseriti: {inserted} record in riconciliazione_risultati")
