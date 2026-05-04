@@ -200,9 +200,7 @@ def _reconcile_satispay(conn, df_f: pd.DataFrame, tol: float) -> int:
 
 def _reconcile_buoni(conn, df_f: pd.DataFrame, tol: float, exclude_pvs: set = None) -> int:
     """Riconcilia i buoni/voucher (iP Portal) vs Fortech.
-    Teorico = totale_buoni + prove_erogazione + clienti_fine_mese + diversi.
-    Questi ultimi tre campi fanno parte dello stesso flusso iPortal e vengono
-    sommati al buoni per evitare righe duplicate per impianto nello stesso giorno.
+    Teorico = totale_buoni.
     Reale   = somma Importo dal file iPortal, raggruppato per data e codice PV.
     exclude_pvs: impianti senza servizio (gestiti da _reconcile_buoni_petrolifere_combined).
     """
@@ -213,19 +211,7 @@ def _reconcile_buoni(conn, df_f: pd.DataFrame, tol: float, exclude_pvs: set = No
         "GROUP BY codice_pv, data", cols)
 
     df_src = df_f[~df_f["codice_pv"].isin(exclude_pvs)].copy() if exclude_pvs else df_f.copy()
-
-    # Colonne extra: prove_erogazione, clienti_fine_mese, diversi (se presenti nel Fortech)
-    extra_cols = [c for c in ("prove_erogazione", "clienti_fine_mese", "diversi") if c in df_src.columns]
-    sel_cols   = ["codice_pv", "data", "totale_buoni"] + extra_cols
-    m = df_src[sel_cols].copy()
-    for c in extra_cols:
-        m[c] = pd.to_numeric(m[c], errors="coerce").fillna(0.0)
-
-    # Teorico = buoni + prove_erogazione + clienti_fine_mese + diversi
-    m["teorico"] = m["totale_buoni"].astype(float)
-    for c in extra_cols:
-        m["teorico"] += m[c]
-
+    m = df_src[["codice_pv", "data", "totale_buoni"]].copy()
     if not df_reale.empty:
         m = m.merge(df_reale, on=["codice_pv", "data"], how="left")
     else:
@@ -234,23 +220,17 @@ def _reconcile_buoni(conn, df_f: pd.DataFrame, tol: float, exclude_pvs: set = No
 
     params = []
     for _, row in m.iterrows():
-        teorico = float(row["teorico"])
+        teorico = float(row["totale_buoni"])
         reale   = float(row["reale"])
         stato   = _calcola_stato(teorico, reale, tol)
         if stato:
             diff = round(reale - teorico, 2)
-            # Nota nel campo note: mostra il dettaglio dei componenti
-            extra_note = ", ".join(
-                f"{c.replace('_', ' ').title()}={float(row[c]):.2f}"
-                for c in extra_cols if float(row.get(c, 0)) != 0
-            )
-            note = f"[{extra_note}]" if extra_note else ""
             params.append((int(row["codice_pv"]), row["data"], "buoni",
-                           teorico, reale, diff, stato, "nessuno", note))
+                           teorico, reale, diff, stato, "nessuno", ""))
 
     conn.executemany(_SQL_UPSERT, params)
     count = len(params)
-    print(f"  [buoni]         {count} record (incl. prove_erogazione/clienti_fine_mese/diversi)")
+    print(f"  [buoni]         {count} record")
     return count
 
 
@@ -358,9 +338,14 @@ def _reconcile_petrolifere(conn, df_f: pd.DataFrame, tol: float, exclude_pvs: se
 
 def _reconcile_informative(conn, df_f: pd.DataFrame) -> int:
     """Inserisce prove_erogazione, clienti_fine_mese e diversi come categorie
-    in riconciliazione_risultati. Non esiste un file reale di confronto:
-    valore_reale = 0 sempre; lo stato sarà NON_TROVATO se teorico > 0,
-    QUADRATO se teorico = 0.
+    in riconciliazione_risultati.
+
+    REGOLA: una sola riga per giornata per categoria (aggregata su tutti gli impianti),
+    non una riga per ogni impianto. La riga viene associata al primo impianto
+    (codice_pv minore) che ha il valore != 0 per quella data.
+
+    valore_reale = 0 (non esiste un file reale di confronto per queste voci).
+    stato = NON_TROVATO se totale > 0.
     """
     categorie_map = {
         "prove_erogazione":  "prove_erogazione",
@@ -372,22 +357,36 @@ def _reconcile_informative(conn, df_f: pd.DataFrame) -> int:
     for col_f, cat_name in categorie_map.items():
         if col_f not in df_f.columns:
             continue
-        for _, row in df_f.iterrows():
-            teorico = float(row.get(col_f, 0) or 0)
-            if teorico == 0:
-                continue          # skip righe a zero — non inquinano la tabella
-            stato = ST_NON_TROVATO  # non c'è file reale da confrontare
-            diff  = round(0.0 - teorico, 2)
+
+        df_col = df_f[["data", "codice_pv", col_f]].copy()
+        df_col[col_f] = pd.to_numeric(df_col[col_f], errors="coerce").fillna(0.0)
+
+        # Aggrega per data: SOMMA il valore su tutti gli impianti
+        agg = (
+            df_col[df_col[col_f] != 0]
+            .groupby("data")
+            .agg(
+                totale=(col_f, "sum"),
+                codice_pv=("codice_pv", "min"),   # impianto "intestatario" (il minore)
+            )
+            .reset_index()
+        )
+
+        for _, row in agg.iterrows():
+            totale = float(row["totale"])
+            if totale == 0:
+                continue
+            diff = round(0.0 - totale, 2)
             params.append((
-                int(row["codice_pv"]), row["data"], cat_name,
-                teorico, 0.0, diff, stato, "nessuno",
-                "Valore da Fortech — nessun file reale di confronto"
+                int(row["codice_pv"]), str(row["data"]), cat_name,
+                totale, 0.0, diff, ST_NON_TROVATO, "nessuno",
+                "Totale giornaliero da Fortech (aggregato)"
             ))
 
     if params:
         conn.executemany(_SQL_UPSERT, params)
     count = len(params)
-    print(f"  [informative]   {count} record (prove_erogazione + clienti_fine_mese + diversi)")
+    print(f"  [informative]   {count} record (prove_erogazione + clienti_fine_mese + diversi, 1 per giorno)")
     return count
 
 
@@ -453,9 +452,10 @@ def reconcile(conn=None) -> int:
     except Exception as e:
         print(f"  [ERR] buoni_petrolifere_combined: {e}")
 
-    # NOTA: prove_erogazione, clienti_fine_mese, diversi sono inclusi
-    # nel teorico di _reconcile_buoni e _reconcile_buoni_petrolifere_combined.
-    # Non vengono più inseriti come categorie separate per evitare duplicati.
+    try:
+        inserted += _reconcile_informative(conn, df_f)
+    except Exception as e:
+        print(f"  [ERR] informative: {e}")
 
 
     conn.commit()
