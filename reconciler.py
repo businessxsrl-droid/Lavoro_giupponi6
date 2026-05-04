@@ -106,7 +106,9 @@ def _get_impianti_senza_servizio(conn) -> set:
 
 def _carica_fortech(conn) -> pd.DataFrame:
     """Legge tutte le giornate Fortech dal DB."""
-    cols = ["codice_pv", "data", "totale_contante", "totale_pos", "totale_buoni", "totale_satispay", "totale_petrolifere"]
+    cols = ["codice_pv", "data", "totale_contante", "totale_pos", "totale_buoni",
+            "totale_satispay", "totale_petrolifere",
+            "prove_erogazione", "clienti_fine_mese", "diversi"]
     return _to_df(conn, f"SELECT {', '.join(cols)} FROM transazioni_fortech", cols)
 
 
@@ -327,6 +329,45 @@ def _reconcile_petrolifere(conn, df_f: pd.DataFrame, tol: float, exclude_pvs: se
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+#  CATEGORIE INFORMATIVE (Prove erogazione / Clienti fine mese / Diversi)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _reconcile_informative(conn, df_f: pd.DataFrame) -> int:
+    """Inserisce prove_erogazione, clienti_fine_mese e diversi come categorie
+    in riconciliazione_risultati. Non esiste un file reale di confronto:
+    valore_reale = 0 sempre; lo stato sarà NON_TROVATO se teorico > 0,
+    QUADRATO se teorico = 0.
+    """
+    categorie_map = {
+        "prove_erogazione":  "prove_erogazione",
+        "clienti_fine_mese": "clienti_fine_mese",
+        "diversi":           "diversi",
+    }
+
+    params = []
+    for col_f, cat_name in categorie_map.items():
+        if col_f not in df_f.columns:
+            continue
+        for _, row in df_f.iterrows():
+            teorico = float(row.get(col_f, 0) or 0)
+            if teorico == 0:
+                continue          # skip righe a zero — non inquinano la tabella
+            stato = ST_NON_TROVATO  # non c'è file reale da confrontare
+            diff  = round(0.0 - teorico, 2)
+            params.append((
+                int(row["codice_pv"]), row["data"], cat_name,
+                teorico, 0.0, diff, stato, "nessuno",
+                "Valore da Fortech — nessun file reale di confronto"
+            ))
+
+    if params:
+        conn.executemany(_SQL_UPSERT, params)
+    count = len(params)
+    print(f"  [informative]   {count} record (prove_erogazione + clienti_fine_mese + diversi)")
+    return count
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 #  RICONCILIAZIONE PRINCIPALE
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -387,6 +428,11 @@ def reconcile(conn=None) -> int:
         inserted += _reconcile_buoni_petrolifere_combined(conn, df_f, tol["buoni"], pvs=senza_servizio_pvs)
     except Exception as e:
         print(f"  [ERR] buoni_petrolifere_combined: {e}")
+
+    try:
+        inserted += _reconcile_informative(conn, df_f)
+    except Exception as e:
+        print(f"  [ERR] informative: {e}")
 
     conn.commit()
     print(f"[reconcile] Totale inseriti: {inserted} record in riconciliazione_risultati")

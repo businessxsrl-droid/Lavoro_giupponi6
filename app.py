@@ -285,13 +285,9 @@ def get_riconciliazioni():
     query  = '''
         SELECT r.id, r.codice_pv, r.data, r.categoria,
                r.valore_teorico, r.valore_reale, r.differenza, r.stato, r.note, r.tipo_match,
-               i.nome AS nome_pv,
-               COALESCE(f.prove_erogazione, 0)  AS prove_erogazione,
-               COALESCE(f.clienti_fine_mese, 0) AS clienti_fine_mese,
-               COALESCE(f.diversi, 0)            AS diversi
+               i.nome AS nome_pv
         FROM riconciliazione_risultati r
         LEFT JOIN impianti i ON r.codice_pv = i.codice_pv
-        LEFT JOIN transazioni_fortech f ON r.codice_pv = f.codice_pv AND r.data = f.data
         WHERE 1=1
     '''
     params = []
@@ -310,26 +306,31 @@ def get_riconciliazioni():
     rows = conn.execute(query, params).fetchall()
     conn.close()
 
-    def _safe_float(val):
-        try:
-            return float(val) if val is not None else 0.0
-        except Exception:
-            return 0.0
+    # Etichette leggibili per le categorie
+    _CAT_LABEL = {
+        "carte_bancarie":          "Carte bancarie (POS)",
+        "satispay":                "Satispay",
+        "buoni":                   "Buoni / Voucher",
+        "carte_petrolifere":       "Carte petrolifere",
+        "buoni_petrolifere":       "Buoni + Petrolifere",
+        "buoni_petrolifere_combined": "Buoni + Petrolifere (combinato)",
+        "prove_erogazione":        "Prove di erogazione",
+        "clienti_fine_mese":       "Clienti fine mese",
+        "diversi":                 "Diversi",
+    }
 
     return jsonify([{
         "id":               r["id"],
         "data":             r["data"],
         "impianto":         f"{r['codice_pv']} – {r['nome_pv'] or 'N/D'}",
         "categoria":        r["categoria"],
+        "categoria_label":  _CAT_LABEL.get(r["categoria"], r["categoria"]),
         "valore_fortech":   r["valore_teorico"],
         "valore_reale":     r["valore_reale"],
         "differenza":       r["differenza"],
         "stato":            r["stato"],
         "tipo_match":       r["tipo_match"] or "nessuno",
         "note":             r["note"] or "",
-        "prove_erogazione": _safe_float(r.get("prove_erogazione")),
-        "clienti_fine_mese": _safe_float(r.get("clienti_fine_mese")),
-        "diversi":          _safe_float(r.get("diversi")),
     } for r in rows])
 
 
@@ -404,16 +405,14 @@ def export_excel():
     a  = request.args.get("a")
     pv = request.args.get("pv")
 
+    # Nessuna colonna extra ripetuta: prove_erogazione, clienti_fine_mese, diversi
+    # sono ora righe di categoria in riconciliazione_risultati come tutte le altre.
     query  = '''
-        SELECT r.data, i.nome AS impianto, r.categoria,
-               r.valore_teorico, r.valore_reale, r.differenza, r.stato, r.note, r.tipo_match,
-               COALESCE(f.prove_erogazione, 0)  AS prove_erogazione,
-               COALESCE(f.clienti_fine_mese, 0) AS clienti_fine_mese,
-               COALESCE(f.diversi, 0)            AS diversi
-
+        SELECT r.data, i.nome AS impianto, r.codice_pv,
+               r.categoria,
+               r.valore_teorico, r.valore_reale, r.differenza, r.stato, r.note, r.tipo_match
         FROM riconciliazione_risultati r
         LEFT JOIN impianti i ON r.codice_pv = i.codice_pv
-        LEFT JOIN transazioni_fortech f ON f.codice_pv = r.codice_pv AND f.data = r.data
         WHERE 1=1
     '''
     params = []
@@ -426,35 +425,107 @@ def export_excel():
     if pv:
         query  += " AND r.codice_pv = ?"
         params.append(int(pv))
-    query += " ORDER BY r.data DESC, r.categoria"
+    query += " ORDER BY r.data DESC, i.nome, r.categoria"
 
     conn = get_connection()
     rows = conn.execute(query, params).fetchall()
     conn.close()
 
-    cols = ["data", "impianto", "categoria", "valore_teorico", "valore_reale",
-            "differenza", "stato", "note", "tipo_match",
-            "prove_erogazione", "clienti_fine_mese", "diversi"]
-    df = pd.DataFrame([dict(r) for r in rows], columns=cols) if rows else pd.DataFrame(columns=cols)
+    # Mappa categorie interne -> etichetta leggibile in italiano
+    _CAT_LABEL = {
+        "carte_bancarie":          "Carte bancarie (POS)",
+        "satispay":                "Satispay",
+        "buoni":                   "Buoni / Voucher",
+        "carte_petrolifere":       "Carte petrolifere",
+        "buoni_petrolifere":       "Buoni + Petrolifere",
+        "buoni_petrolifere_combined": "Buoni + Petrolifere (combinato)",
+        "prove_erogazione":        "Prove di erogazione",
+        "clienti_fine_mese":       "Clienti fine mese",
+        "diversi":                 "Diversi",
+    }
+
+    cols = ["data", "impianto", "codice_pv", "categoria_label",
+            "valore_teorico", "valore_reale", "differenza", "stato", "note", "tipo_match"]
+
+    records = []
+    for r in rows:
+        cat_raw   = r["categoria"]
+        cat_label = _CAT_LABEL.get(cat_raw, cat_raw)
+        records.append({
+            "data":           r["data"],
+            "impianto":       f"{r['codice_pv']} – {r['impianto'] or 'N/D'}",
+            "codice_pv":      r["codice_pv"],
+            "categoria_label": cat_label,
+            "valore_teorico": r["valore_teorico"],
+            "valore_reale":   r["valore_reale"],
+            "differenza":     r["differenza"],
+            "stato":          r["stato"],
+            "note":           r["note"] or "",
+            "tipo_match":     r["tipo_match"] or "",
+        })
+
+    df = pd.DataFrame(records, columns=cols) if records else pd.DataFrame(columns=cols)
 
     df.rename(columns={
-        "data": "Data", "impianto": "Impianto", "categoria": "Categoria",
-        "valore_teorico": "Fortech (€)", "valore_reale": "Reale (€)",
-        "differenza": "Diff (€)", "stato": "Stato", "note": "Note",
-        "tipo_match": "Tipo Match",
-        "prove_erogazione": "Prove di erogazione (€)",
-        "clienti_fine_mese": "Clienti con fattura fine mese (€)",
-        "diversi": "Diversi (€)",
+        "data":            "Data",
+        "impianto":        "Impianto",
+        "codice_pv":       "Cod. PV",
+        "categoria_label": "Categoria",
+        "valore_teorico":  "Fortech (€)",
+        "valore_reale":    "Reale (€)",
+        "differenza":      "Diff (€)",
+        "stato":           "Stato",
+        "note":            "Note",
+        "tipo_match":      "Tipo Match",
     }, inplace=True)
+
+    import openpyxl
+    from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
 
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as writer:
         df.to_excel(writer, index=False, sheet_name="Riconciliazioni")
-    buf.seek(0)
+        ws = writer.sheets["Riconciliazioni"]
 
+        # ── Stile header ──────────────────────────────────────────────────────
+        header_fill = PatternFill("solid", fgColor="1F4D49")
+        header_font = Font(color="FFFFFF", bold=True)
+        for cell in ws[1]:
+            cell.fill   = header_fill
+            cell.font   = header_font
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+
+        # ── Colori per stato ──────────────────────────────────────────────────
+        _FILL = {
+            "QUADRATO":        PatternFill("solid", fgColor="C6EFCE"),  # verde
+            "QUADRATO_ARROT":  PatternFill("solid", fgColor="DDEBF7"),  # azzurro
+            "ANOMALIA_LIEVE":  PatternFill("solid", fgColor="FFEB9C"),  # giallo
+            "ANOMALIA_GRAVE":  PatternFill("solid", fgColor="FFC7CE"),  # rosso
+            "NON_TROVATO":     PatternFill("solid", fgColor="F4CCCC"),  # arancione chiaro
+        }
+        # Colonna "Stato" (indice 8 = colonna H nel foglio con header a riga 1)
+        stato_col_idx = df.columns.get_loc("Stato") + 1
+        for row_idx in range(2, ws.max_row + 1):
+            stato_cell  = ws.cell(row=row_idx, column=stato_col_idx)
+            stato_val   = str(stato_cell.value or "")
+            fill        = _FILL.get(stato_val)
+            if fill:
+                for c in range(1, ws.max_column + 1):
+                    ws.cell(row=row_idx, column=c).fill = fill
+
+        # ── Larghezza colonne automatica ──────────────────────────────────────
+        for col in ws.columns:
+            max_len = max((len(str(cell.value or "")) for cell in col), default=10)
+            ws.column_dimensions[get_column_letter(col[0].column)].width = min(max_len + 4, 45)
+
+        ws.freeze_panes = "A2"
+
+    buf.seek(0)
     fname = f"Riconciliazioni_{datetime.date.today().isoformat()}.xlsx"
     return send_file(buf, as_attachment=True, download_name=fname,
                      mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
