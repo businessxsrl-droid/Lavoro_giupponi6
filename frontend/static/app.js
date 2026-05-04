@@ -774,7 +774,10 @@ function esportaExcel() {
     if (pv) params.push(`pv=${pv}`);
     if (params.length > 0) url += '?' + params.join('&');
 
-    fetch(url, { cache: 'no-store' })
+    fetch(url, { 
+        cache: 'no-store',
+        headers: { 'Authorization': 'Bearer ' + token }
+    })
         .then(response => {
             if (!response.ok) throw new Error(`Errore generazione Excel (HTTP ${response.status})`);
             return response.blob();
