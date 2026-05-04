@@ -802,26 +802,43 @@ function esportaExcel() {
 
 function esportaPDF() {
     const element = document.getElementById('riconciliazioniTablesContainer');
-    // Salva l'originale
-    const originalStyle = element.style.cssText;
+    if (!element) {
+        showToast("Nessun dato da esportare in PDF", "error");
+        return;
+    }
+    if (!element.children.length) {
+        showToast("Carica prima le riconciliazioni", "error");
+        return;
+    }
+
+    showToast("Generazione PDF in corso...", "info");
 
     // Configura html2pdf per non mostrare bottoni azione
     var opt = {
-        margin: 10,
+        margin: [10, 10, 10, 10],
         filename: `Riconciliazioni_${new Date().toISOString().split('T')[0]}.pdf`,
-        image: { type: 'jpeg', quality: 0.98 },
-        html2canvas: { scale: 2, useCORS: true },
-        jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' }
+        image: { type: 'jpeg', quality: 0.95 },
+        html2canvas: { scale: 1.5, useCORS: true, logging: false, scrollY: 0 },
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' },
+        pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
     };
 
-    // Rimuovi temporaneamente i bottoni azione per il PDF
-    const btnActions = element.querySelectorAll('.btn-action');
+    // Nascondi temporaneamente i bottoni azione per il PDF
+    const btnActions = element.querySelectorAll('.btn-action, .btn-toggle-section');
     btnActions.forEach(btn => btn.style.display = 'none');
 
-    html2pdf().set(opt).from(element).save().then(() => {
-        // Ripristina l'UI
-        loadRiconciliazioni();
-    });
+    html2pdf().set(opt).from(element).save()
+        .then(() => {
+            showToast("PDF esportato con successo!", "success");
+        })
+        .catch(err => {
+            console.error("Errore PDF:", err);
+            showToast("Errore durante la generazione del PDF: " + err.message, "error");
+        })
+        .finally(() => {
+            // Ripristina i bottoni
+            btnActions.forEach(btn => btn.style.display = '');
+        });
 }
 
 // ── Contanti / Banca (Simona — Conferma Matching) ──
