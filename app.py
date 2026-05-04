@@ -619,7 +619,7 @@ def export_excel():
         if n > 1:
             for ci in [1, 2, 8, 9, 10]:
                 rng = CellRange(min_col=ci, min_row=first, max_col=ci, max_row=last)
-                ws.merged_cells.ranges.append(rng)
+                ws.merged_cells.add(rng)
             
             # Restore alignments for merged cells
             ws.cell(row=first, column=1).alignment = _AL_CTR_WRAP
