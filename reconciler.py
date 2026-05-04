@@ -327,69 +327,7 @@ def _reconcile_petrolifere(conn, df_f: pd.DataFrame, tol: float, exclude_pvs: se
 
     
     conn.executemany(_SQL_UPSERT, params)
-    count = len(params)
-    print(f"  [carte_petrolifere]   {count} record")
     return count
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  CATEGORIE INFORMATIVE (Prove erogazione / Clienti fine mese / Diversi)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def _reconcile_informative(conn, df_f: pd.DataFrame) -> int:
-    """Inserisce prove_erogazione, clienti_fine_mese e diversi come categorie
-    in riconciliazione_risultati.
-
-    REGOLA: una sola riga per giornata per categoria (aggregata su tutti gli impianti),
-    non una riga per ogni impianto. La riga viene associata al primo impianto
-    (codice_pv minore) che ha il valore != 0 per quella data.
-
-    valore_reale = 0 (non esiste un file reale di confronto per queste voci).
-    stato = NON_TROVATO se totale > 0.
-    """
-    categorie_map = {
-        "prove_erogazione":  "prove_erogazione",
-        "clienti_fine_mese": "clienti_fine_mese",
-        "diversi":           "diversi",
-    }
-
-    params = []
-    for col_f, cat_name in categorie_map.items():
-        if col_f not in df_f.columns:
-            continue
-
-        df_col = df_f[["data", "codice_pv", col_f]].copy()
-        df_col[col_f] = pd.to_numeric(df_col[col_f], errors="coerce").fillna(0.0)
-
-        # Aggrega per data: SOMMA il valore su tutti gli impianti
-        agg = (
-            df_col[df_col[col_f] != 0]
-            .groupby("data")
-            .agg(
-                totale=(col_f, "sum"),
-                codice_pv=("codice_pv", "min"),   # impianto "intestatario" (il minore)
-            )
-            .reset_index()
-        )
-
-        for _, row in agg.iterrows():
-            totale = float(row["totale"])
-            if totale == 0:
-                continue
-            diff = round(0.0 - totale, 2)
-            params.append((
-                int(row["codice_pv"]), str(row["data"]), cat_name,
-                totale, 0.0, diff, ST_NON_TROVATO, "nessuno",
-                "Totale giornaliero da Fortech (aggregato)"
-            ))
-
-    if params:
-        conn.executemany(_SQL_UPSERT, params)
-    count = len(params)
-    print(f"  [informative]   {count} record (prove_erogazione + clienti_fine_mese + diversi, 1 per giorno)")
-    return count
-
-
 # ═══════════════════════════════════════════════════════════════════════════════
 #  RICONCILIAZIONE PRINCIPALE
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -452,12 +390,9 @@ def reconcile(conn=None) -> int:
     except Exception as e:
         print(f"  [ERR] buoni_petrolifere_combined: {e}")
 
-    try:
-        inserted += _reconcile_informative(conn, df_f)
-    except Exception as e:
-        print(f"  [ERR] informative: {e}")
 
 
+    conn.commit()
     conn.commit()
     print(f"[reconcile] Totale inseriti: {inserted} record in riconciliazione_risultati")
 

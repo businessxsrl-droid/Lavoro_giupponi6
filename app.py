@@ -408,9 +408,13 @@ def export_excel():
     query = """
         SELECT r.data, i.nome AS impianto, r.codice_pv,
                r.categoria,
-               r.valore_teorico, r.valore_reale, r.differenza, r.stato, r.note, r.tipo_match
+               r.valore_teorico, r.valore_reale, r.differenza, r.stato, r.note, r.tipo_match,
+               COALESCE(f.prove_erogazione, 0) AS prove_erogazione,
+               COALESCE(f.clienti_fine_mese, 0) AS clienti_fine_mese,
+               COALESCE(f.diversi, 0) AS diversi
         FROM riconciliazione_risultati r
         LEFT JOIN impianti i ON r.codice_pv = i.codice_pv
+        LEFT JOIN transazioni_fortech f ON r.codice_pv = f.codice_pv AND r.data = f.data
         WHERE 1=1
     """
     params = []
@@ -435,10 +439,7 @@ def export_excel():
         "buoni":                      "Buoni / Voucher",
         "carte_petrolifere":          "Carte petrolifere",
         "buoni_petrolifere":          "Buoni + Petrolifere",
-        "buoni_petrolifere_combined": "Buoni + Petrolifere (combinato)",
-        "prove_erogazione":           "Prove di erogazione",
-        "clienti_fine_mese":          "Clienti fine mese",
-        "diversi":                    "Diversi",
+        "buoni_petrolifere_combined": "Buoni + Petrolifere (combinato)"
     }
     _STATO_LABEL = {
         "QUADRATO":       "OK - Quadrato",
@@ -450,6 +451,10 @@ def export_excel():
 
     records = []
     for r in rows:
+        # Non aggiungiamo prove/clienti/diversi come righe separate se per caso sono rimaste nel db
+        if r["categoria"] in ("prove_erogazione", "clienti_fine_mese", "diversi"):
+            continue
+            
         records.append({
             "data":      r["data"],
             "impianto":  f"{r['codice_pv']} - {r['impianto'] or 'N/D'}",
@@ -460,12 +465,16 @@ def export_excel():
             "stato_raw": r["stato"] or "",
             "stato":     _STATO_LABEL.get(r["stato"] or "", r["stato"] or ""),
             "note":      r["note"] or "",
+            "prove":     float(r["prove_erogazione"] or 0),
+            "clienti":   float(r["clienti_fine_mese"] or 0),
+            "diversi":   float(r["diversi"] or 0),
         })
 
     import openpyxl
     from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
     from openpyxl.utils import get_column_letter
     from itertools import groupby as _groupby
+    import datetime
 
     _FILL_STATO = {
         "QUADRATO":       PatternFill("solid", fgColor="C6EFCE"),
@@ -491,8 +500,9 @@ def export_excel():
     _AL_LEFT = Alignment(horizontal="left",   vertical="center")
 
     HEADERS    = ["Data", "Impianto", "Categoria",
-                  "Fortech (EUR)", "Reale (EUR)", "Diff (EUR)", "Stato", "Note"]
-    COL_WIDTHS = [14, 36, 28, 14, 14, 12, 24, 42]
+                  "Fortech (EUR)", "Reale (EUR)", "Diff (EUR)", "Stato", 
+                  "Prove Erog.", "Clienti F.M.", "Diversi", "Note"]
+    COL_WIDTHS = [14, 36, 28, 14, 14, 12, 24, 14, 14, 14, 42]
     NUM_COLS   = len(HEADERS)
     FMT_EUR    = "#,##0.00"
 
@@ -530,6 +540,7 @@ def export_excel():
             ri = cur_row + i
             is_last = (i == n - 1)
 
+            # A: Data, B: Impianto, H: Prove, I: Clienti, J: Diversi
             if i == 0:
                 c1 = ws.cell(row=ri, column=1, value=rec["data"])
                 c1.font      = _FONT_GRP
@@ -537,6 +548,13 @@ def export_excel():
                 c2 = ws.cell(row=ri, column=2, value=rec["impianto"])
                 c2.font      = _FONT_GRP
                 c2.alignment = _AL_LEFT
+                
+                # H, I, J
+                for ci, key in [(8, "prove"), (9, "clienti"), (10, "diversi")]:
+                    cx = ws.cell(row=ri, column=ci, value=rec[key])
+                    cx.number_format = FMT_EUR
+                    cx.font          = _FONT_GRP
+                    cx.alignment     = _AL_CTR
 
             ws.cell(row=ri, column=3, value=rec["categoria"]).font = _FONT_NORM
 
@@ -563,7 +581,7 @@ def export_excel():
             if sf:
                 sc.fill = sf
 
-            nc = ws.cell(row=ri, column=8, value=rec["note"])
+            nc = ws.cell(row=ri, column=11, value=rec["note"])
             nc.font      = _FONT_NORM
             nc.alignment = _AL_LEFT
 
@@ -577,14 +595,15 @@ def export_excel():
             ws.row_dimensions[ri].height = 16
 
         if n > 1:
-            ws.merge_cells(start_row=first, start_column=1,
-                           end_row=last,    end_column=1)
-            ws.merge_cells(start_row=first, start_column=2,
-                           end_row=last,    end_column=2)
-            ws.cell(row=first, column=1).alignment = Alignment(
-                horizontal="center", vertical="center", wrap_text=True)
-            ws.cell(row=first, column=2).alignment = Alignment(
-                horizontal="left", vertical="center", wrap_text=True)
+            for ci in [1, 2, 8, 9, 10]:
+                ws.merge_cells(start_row=first, start_column=ci,
+                               end_row=last,    end_column=ci)
+            
+            # Restore alignments for merged cells
+            ws.cell(row=first, column=1).alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            ws.cell(row=first, column=2).alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+            for ci in [8, 9, 10]:
+                ws.cell(row=first, column=ci).alignment = Alignment(horizontal="center", vertical="center")
 
         if grp_idx > 1:
             for ci in range(1, NUM_COLS + 1):
@@ -603,13 +622,23 @@ def export_excel():
             cell.alignment = _AL_CTR
             cell.border    = Border(top=_THICK)
         ws.cell(row=tr, column=3, value="TOTALE GENERALE")
+        
+        # Calculate sum for unique groups to avoid summing merged cells multiple times
+        unique_groups = { (r["data"], r["impianto"]): r for r in records }.values()
+
         for ci, key in [(4, "fortech"), (5, "reale"), (6, "diff")]:
             c = ws.cell(row=tr, column=ci, value=sum(r[key] for r in records))
             c.number_format = FMT_EUR
+            
+        for ci, key in [(8, "prove"), (9, "clienti"), (10, "diversi")]:
+            c = ws.cell(row=tr, column=ci, value=sum(r[key] for r in unique_groups))
+            c.number_format = FMT_EUR
+
         ws.row_dimensions[tr].height = 18
 
     wb.save(buf)
     buf.seek(0)
+    import io, datetime
     fname = f"Riconciliazioni_{datetime.date.today().isoformat()}.xlsx"
     return send_file(buf, as_attachment=True, download_name=fname,
                      mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
