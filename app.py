@@ -405,25 +405,23 @@ def export_excel():
     a  = request.args.get("a")
     pv = request.args.get("pv")
 
-    # Nessuna colonna extra ripetuta: prove_erogazione, clienti_fine_mese, diversi
-    # sono ora righe di categoria in riconciliazione_risultati come tutte le altre.
-    query  = '''
+    query = """
         SELECT r.data, i.nome AS impianto, r.codice_pv,
                r.categoria,
                r.valore_teorico, r.valore_reale, r.differenza, r.stato, r.note, r.tipo_match
         FROM riconciliazione_risultati r
         LEFT JOIN impianti i ON r.codice_pv = i.codice_pv
         WHERE 1=1
-    '''
+    """
     params = []
     if da:
-        query  += " AND r.data >= ?"
+        query += " AND r.data >= ?"
         params.append(da)
     if a:
-        query  += " AND r.data <= ?"
+        query += " AND r.data <= ?"
         params.append(a)
     if pv:
-        query  += " AND r.codice_pv = ?"
+        query += " AND r.codice_pv = ?"
         params.append(int(pv))
     query += " ORDER BY r.data DESC, i.nome, r.categoria"
 
@@ -431,96 +429,186 @@ def export_excel():
     rows = conn.execute(query, params).fetchall()
     conn.close()
 
-    # Mappa categorie interne -> etichetta leggibile in italiano
     _CAT_LABEL = {
-        "carte_bancarie":          "Carte bancarie (POS)",
-        "satispay":                "Satispay",
-        "buoni":                   "Buoni / Voucher",
-        "carte_petrolifere":       "Carte petrolifere",
-        "buoni_petrolifere":       "Buoni + Petrolifere",
+        "carte_bancarie":             "Carte bancarie (POS)",
+        "satispay":                   "Satispay",
+        "buoni":                      "Buoni / Voucher",
+        "carte_petrolifere":          "Carte petrolifere",
+        "buoni_petrolifere":          "Buoni + Petrolifere",
         "buoni_petrolifere_combined": "Buoni + Petrolifere (combinato)",
-        "prove_erogazione":        "Prove di erogazione",
-        "clienti_fine_mese":       "Clienti fine mese",
-        "diversi":                 "Diversi",
+        "prove_erogazione":           "Prove di erogazione",
+        "clienti_fine_mese":          "Clienti fine mese",
+        "diversi":                    "Diversi",
     }
-
-    cols = ["data", "impianto", "codice_pv", "categoria_label",
-            "valore_teorico", "valore_reale", "differenza", "stato", "note", "tipo_match"]
+    _STATO_LABEL = {
+        "QUADRATO":       "OK - Quadrato",
+        "QUADRATO_ARROT": "OK - Arrotondamento",
+        "ANOMALIA_LIEVE": "Anomalia lieve",
+        "ANOMALIA_GRAVE": "ANOMALIA GRAVE",
+        "NON_TROVATO":    "NON TROVATO",
+    }
 
     records = []
     for r in rows:
-        cat_raw   = r["categoria"]
-        cat_label = _CAT_LABEL.get(cat_raw, cat_raw)
         records.append({
-            "data":           r["data"],
-            "impianto":       f"{r['codice_pv']} – {r['impianto'] or 'N/D'}",
-            "codice_pv":      r["codice_pv"],
-            "categoria_label": cat_label,
-            "valore_teorico": r["valore_teorico"],
-            "valore_reale":   r["valore_reale"],
-            "differenza":     r["differenza"],
-            "stato":          r["stato"],
-            "note":           r["note"] or "",
-            "tipo_match":     r["tipo_match"] or "",
+            "data":      r["data"],
+            "impianto":  f"{r['codice_pv']} - {r['impianto'] or 'N/D'}",
+            "categoria": _CAT_LABEL.get(r["categoria"], r["categoria"]),
+            "fortech":   float(r["valore_teorico"] or 0),
+            "reale":     float(r["valore_reale"]   or 0),
+            "diff":      float(r["differenza"]     or 0),
+            "stato_raw": r["stato"] or "",
+            "stato":     _STATO_LABEL.get(r["stato"] or "", r["stato"] or ""),
+            "note":      r["note"] or "",
         })
-
-    df = pd.DataFrame(records, columns=cols) if records else pd.DataFrame(columns=cols)
-
-    df.rename(columns={
-        "data":            "Data",
-        "impianto":        "Impianto",
-        "codice_pv":       "Cod. PV",
-        "categoria_label": "Categoria",
-        "valore_teorico":  "Fortech (€)",
-        "valore_reale":    "Reale (€)",
-        "differenza":      "Diff (€)",
-        "stato":           "Stato",
-        "note":            "Note",
-        "tipo_match":      "Tipo Match",
-    }, inplace=True)
 
     import openpyxl
     from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
     from openpyxl.utils import get_column_letter
+    from itertools import groupby as _groupby
+
+    _FILL_STATO = {
+        "QUADRATO":       PatternFill("solid", fgColor="C6EFCE"),
+        "QUADRATO_ARROT": PatternFill("solid", fgColor="DDEBF7"),
+        "ANOMALIA_LIEVE": PatternFill("solid", fgColor="FFEB9C"),
+        "ANOMALIA_GRAVE": PatternFill("solid", fgColor="FFC7CE"),
+        "NON_TROVATO":    PatternFill("solid", fgColor="F4CCCC"),
+    }
+    _FILL_ODD  = PatternFill("solid", fgColor="F2F7F6")
+    _FILL_EVEN = PatternFill("solid", fgColor="FFFFFF")
+    _THIN  = Side(style="thin",   color="CCCCCC")
+    _THICK = Side(style="medium", color="1F4D49")
+    _BORDER_INNER = Border(bottom=_THIN)
+
+    _FONT_HDR      = Font(bold=True, color="FFFFFF", size=11, name="Calibri")
+    _FONT_GRP      = Font(bold=True, size=10, color="1F4D49", name="Calibri")
+    _FONT_NORM     = Font(size=10, name="Calibri")
+    _FONT_DIFF_NEG = Font(size=10, bold=True, color="C00000", name="Calibri")
+    _FONT_DIFF_POS = Font(size=10, bold=True, color="375623", name="Calibri")
+    _FONT_STATO    = Font(size=9, bold=True, name="Calibri")
+    _FONT_TOT      = Font(bold=True, color="FFFFFF", size=10, name="Calibri")
+    _AL_CTR  = Alignment(horizontal="center", vertical="center")
+    _AL_LEFT = Alignment(horizontal="left",   vertical="center")
+
+    HEADERS    = ["Data", "Impianto", "Categoria",
+                  "Fortech (EUR)", "Reale (EUR)", "Diff (EUR)", "Stato", "Note"]
+    COL_WIDTHS = [14, 36, 28, 14, 14, 12, 24, 42]
+    NUM_COLS   = len(HEADERS)
+    FMT_EUR    = "#,##0.00"
 
     buf = io.BytesIO()
-    with pd.ExcelWriter(buf, engine="openpyxl") as writer:
-        df.to_excel(writer, index=False, sheet_name="Riconciliazioni")
-        ws = writer.sheets["Riconciliazioni"]
+    wb  = openpyxl.Workbook()
+    ws  = wb.active
+    ws.title = "Riconciliazioni"
+    ws.freeze_panes = "C2"
 
-        # ── Stile header ──────────────────────────────────────────────────────
-        header_fill = PatternFill("solid", fgColor="1F4D49")
-        header_font = Font(color="FFFFFF", bold=True)
-        for cell in ws[1]:
-            cell.fill   = header_fill
-            cell.font   = header_font
-            cell.alignment = Alignment(horizontal="center", vertical="center")
+    # Header
+    hdr_fill = PatternFill("solid", fgColor="1F4D49")
+    for ci, (hdr, w) in enumerate(zip(HEADERS, COL_WIDTHS), start=1):
+        cell = ws.cell(row=1, column=ci, value=hdr)
+        cell.fill = hdr_fill
+        cell.font = _FONT_HDR
+        cell.alignment = _AL_CTR
+        ws.column_dimensions[get_column_letter(ci)].width = w
+    ws.row_dimensions[1].height = 22
 
-        # ── Colori per stato ──────────────────────────────────────────────────
-        _FILL = {
-            "QUADRATO":        PatternFill("solid", fgColor="C6EFCE"),  # verde
-            "QUADRATO_ARROT":  PatternFill("solid", fgColor="DDEBF7"),  # azzurro
-            "ANOMALIA_LIEVE":  PatternFill("solid", fgColor="FFEB9C"),  # giallo
-            "ANOMALIA_GRAVE":  PatternFill("solid", fgColor="FFC7CE"),  # rosso
-            "NON_TROVATO":     PatternFill("solid", fgColor="F4CCCC"),  # arancione chiaro
-        }
-        # Colonna "Stato" (indice 8 = colonna H nel foglio con header a riga 1)
-        stato_col_idx = df.columns.get_loc("Stato") + 1
-        for row_idx in range(2, ws.max_row + 1):
-            stato_cell  = ws.cell(row=row_idx, column=stato_col_idx)
-            stato_val   = str(stato_cell.value or "")
-            fill        = _FILL.get(stato_val)
-            if fill:
-                for c in range(1, ws.max_column + 1):
-                    ws.cell(row=row_idx, column=c).fill = fill
+    cur_row = 2
+    grp_idx = 0
 
-        # ── Larghezza colonne automatica ──────────────────────────────────────
-        for col in ws.columns:
-            max_len = max((len(str(cell.value or "")) for cell in col), default=10)
-            ws.column_dimensions[get_column_letter(col[0].column)].width = min(max_len + 4, 45)
+    def _gk(r):
+        return (r["data"], r["impianto"])
 
-        ws.freeze_panes = "A2"
+    for gk, git in _groupby(records, key=_gk):
+        grp = list(git)
+        n   = len(grp)
+        grp_idx += 1
+        fill_bg = _FILL_ODD if grp_idx % 2 else _FILL_EVEN
+        first   = cur_row
+        last    = cur_row + n - 1
 
+        for i, rec in enumerate(grp):
+            ri = cur_row + i
+            is_last = (i == n - 1)
+
+            if i == 0:
+                c1 = ws.cell(row=ri, column=1, value=rec["data"])
+                c1.font      = _FONT_GRP
+                c1.alignment = _AL_CTR
+                c2 = ws.cell(row=ri, column=2, value=rec["impianto"])
+                c2.font      = _FONT_GRP
+                c2.alignment = _AL_LEFT
+
+            ws.cell(row=ri, column=3, value=rec["categoria"]).font = _FONT_NORM
+
+            for ci, key in [(4, "fortech"), (5, "reale")]:
+                c = ws.cell(row=ri, column=ci, value=rec[key])
+                c.number_format = FMT_EUR
+                c.alignment     = _AL_CTR
+                c.font          = _FONT_NORM
+
+            cf = ws.cell(row=ri, column=6, value=rec["diff"])
+            cf.number_format = FMT_EUR
+            cf.alignment     = _AL_CTR
+            if rec["diff"] < -0.01:
+                cf.font = _FONT_DIFF_NEG
+            elif rec["diff"] > 0.01:
+                cf.font = _FONT_DIFF_POS
+            else:
+                cf.font = _FONT_NORM
+
+            sc = ws.cell(row=ri, column=7, value=rec["stato"])
+            sc.font      = _FONT_STATO
+            sc.alignment = _AL_CTR
+            sf = _FILL_STATO.get(rec["stato_raw"])
+            if sf:
+                sc.fill = sf
+
+            nc = ws.cell(row=ri, column=8, value=rec["note"])
+            nc.font      = _FONT_NORM
+            nc.alignment = _AL_LEFT
+
+            for ci in range(1, NUM_COLS + 1):
+                cell = ws.cell(row=ri, column=ci)
+                if ci != 7:
+                    cell.fill = fill_bg
+                if not is_last:
+                    cell.border = _BORDER_INNER
+
+            ws.row_dimensions[ri].height = 16
+
+        if n > 1:
+            ws.merge_cells(start_row=first, start_column=1,
+                           end_row=last,    end_column=1)
+            ws.merge_cells(start_row=first, start_column=2,
+                           end_row=last,    end_column=2)
+            ws.cell(row=first, column=1).alignment = Alignment(
+                horizontal="center", vertical="center", wrap_text=True)
+            ws.cell(row=first, column=2).alignment = Alignment(
+                horizontal="left", vertical="center", wrap_text=True)
+
+        if grp_idx > 1:
+            for ci in range(1, NUM_COLS + 1):
+                ws.cell(row=first, column=ci).border = Border(top=_THICK)
+
+        cur_row = last + 1
+
+    # Riga totale
+    if records:
+        tr = cur_row
+        tot_fill = PatternFill("solid", fgColor="1F4D49")
+        for ci in range(1, NUM_COLS + 1):
+            cell = ws.cell(row=tr, column=ci)
+            cell.fill      = tot_fill
+            cell.font      = _FONT_TOT
+            cell.alignment = _AL_CTR
+            cell.border    = Border(top=_THICK)
+        ws.cell(row=tr, column=3, value="TOTALE GENERALE")
+        for ci, key in [(4, "fortech"), (5, "reale"), (6, "diff")]:
+            c = ws.cell(row=tr, column=ci, value=sum(r[key] for r in records))
+            c.number_format = FMT_EUR
+        ws.row_dimensions[tr].height = 18
+
+    wb.save(buf)
     buf.seek(0)
     fname = f"Riconciliazioni_{datetime.date.today().isoformat()}.xlsx"
     return send_file(buf, as_attachment=True, download_name=fname,
