@@ -638,7 +638,6 @@ def export_excel():
 
     wb.save(buf)
     buf.seek(0)
-    import io, datetime
     fname = f"Riconciliazioni_{datetime.date.today().isoformat()}.xlsx"
     return send_file(buf, as_attachment=True, download_name=fname,
                      mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
