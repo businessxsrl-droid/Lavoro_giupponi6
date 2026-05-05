@@ -591,8 +591,7 @@ def export_excel():
             ri = cur_row + i
             is_last = (i == n - 1)
 
-            # Col 1: Data, Col 2: Impianto, Col 10-12: Prove/Clienti/Diversi
-            # Scritto in OGNI riga (no merge) per permettere i filtri Excel
+            # Col 1: Data, Col 2: Impianto — ripetuti in ogni riga per i filtri Excel
             c1 = ws.cell(row=ri, column=1, value=rec["data"])
             c1.font      = _FONT_GRP
             c1.alignment = _AL_CTR
@@ -600,11 +599,13 @@ def export_excel():
             c2.font      = _FONT_GRP
             c2.alignment = _AL_LEFT
 
-            for ci, key in [(10, "prove"), (11, "clienti"), (12, "diversi")]:
-                cx = ws.cell(row=ri, column=ci, value=rec[key])
-                cx.number_format = FMT_EUR
-                cx.font          = _FONT_GRP
-                cx.alignment     = _AL_CTR
+            # Col 10-12: Prove/Clienti/Diversi — solo sulla prima riga del gruppo
+            if i == 0:
+                for ci, key in [(10, "prove"), (11, "clienti"), (12, "diversi")]:
+                    cx = ws.cell(row=ri, column=ci, value=rec[key])
+                    cx.number_format = FMT_EUR
+                    cx.font          = _FONT_GRP
+                    cx.alignment     = _AL_CTR
 
             ws.cell(row=ri, column=3, value=rec["categoria"]).font = _FONT_NORM
 
