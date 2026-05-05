@@ -591,21 +591,20 @@ def export_excel():
             ri = cur_row + i
             is_last = (i == n - 1)
 
-            # A: Data, B: Impianto, K: Prove, L: Clienti, M: Diversi
-            if i == 0:
-                c1 = ws.cell(row=ri, column=1, value=rec["data"])
-                c1.font      = _FONT_GRP
-                c1.alignment = _AL_CTR
-                c2 = ws.cell(row=ri, column=2, value=rec["impianto"])
-                c2.font      = _FONT_GRP
-                c2.alignment = _AL_LEFT
-                
-                # col 10, 11, 12: Prove, Clienti, Diversi
-                for ci, key in [(10, "prove"), (11, "clienti"), (12, "diversi")]:
-                    cx = ws.cell(row=ri, column=ci, value=rec[key])
-                    cx.number_format = FMT_EUR
-                    cx.font          = _FONT_GRP
-                    cx.alignment     = _AL_CTR
+            # Col 1: Data, Col 2: Impianto, Col 10-12: Prove/Clienti/Diversi
+            # Scritto in OGNI riga (no merge) per permettere i filtri Excel
+            c1 = ws.cell(row=ri, column=1, value=rec["data"])
+            c1.font      = _FONT_GRP
+            c1.alignment = _AL_CTR
+            c2 = ws.cell(row=ri, column=2, value=rec["impianto"])
+            c2.font      = _FONT_GRP
+            c2.alignment = _AL_LEFT
+
+            for ci, key in [(10, "prove"), (11, "clienti"), (12, "diversi")]:
+                cx = ws.cell(row=ri, column=ci, value=rec[key])
+                cx.number_format = FMT_EUR
+                cx.font          = _FONT_GRP
+                cx.alignment     = _AL_CTR
 
             ws.cell(row=ri, column=3, value=rec["categoria"]).font = _FONT_NORM
 
@@ -649,16 +648,7 @@ def export_excel():
 
             ws.row_dimensions[ri].height = 16
 
-        if n > 1:
-            for ci in [1, 2, 10, 11, 12]:
-                rng = CellRange(min_col=ci, min_row=first, max_col=ci, max_row=last)
-                ws.merged_cells.add(rng)
-            
-            # Restore alignments for merged cells
-            ws.cell(row=first, column=1).alignment = _AL_CTR_WRAP
-            ws.cell(row=first, column=2).alignment = _AL_LEFT_WRAP
-            for ci in [10, 11, 12]:
-                ws.cell(row=first, column=ci).alignment = _AL_CTR
+        # Nessun merge: valori ripetuti per riga per compatibilità filtri Excel
 
         if grp_idx > 1:
             for ci in range(1, NUM_COLS + 1):
