@@ -586,6 +586,11 @@ async function loadRiconciliazioni() {
                                 <th style="width: 120px; text-align: right;">Reale (€)</th>
                                 <th style="width: 120px; text-align: right;">Diff (€)</th>
                                 <th style="width: 130px;">Stato</th>
+                                ${cat === 'buoni' ? `
+                                <th style="width: 90px; text-align: right;" title="Prove di erogazione">Prove Erog.</th>
+                                <th style="width: 90px; text-align: right;" title="Clienti con fatturazione a fine mese">Clienti F.M.</th>
+                                <th style="width: 90px; text-align: right;">Diversi</th>
+                                ` : ''}
                                 <th style="width: 200px;">Note</th>
                                 <th style="width: 70px; text-align: center;">Azioni</th>
                             </tr>
@@ -607,6 +612,12 @@ async function loadRiconciliazioni() {
                                         ${renderStatus(r.stato)}
                                         ${r.tipo_match && r.tipo_match !== 'nessuno' ? `<span style="margin-left:5px; cursor:help;" title="${TIPO_MATCH_LABELS[r.tipo_match]?.label || r.tipo_match}">${TIPO_MATCH_LABELS[r.tipo_match]?.icon || ''}</span>` : ''}
                                     </td>
+                                    
+                                    ${cat === 'buoni' ? `
+                                    <td style="text-align: right; font-size: 13px; color: var(--text-secondary);">${r.prove_erogazione > 0 ? renderMoney(r.prove_erogazione) : '—'}</td>
+                                    <td style="text-align: right; font-size: 13px; color: var(--text-secondary);">${r.clienti_fine_mese > 0 ? renderMoney(r.clienti_fine_mese) : '—'}</td>
+                                    <td style="text-align: right; font-size: 13px; color: var(--text-secondary);">${r.diversi > 0 ? renderMoney(r.diversi) : '—'}</td>
+                                    ` : ''}
 
                                     <td style="font-size: 11px; color: var(--text-secondary); line-height: 1.4;">
                                         <span class="val-note-text" id="note-txt-${r.id}">${r.note || ''}</span>
@@ -628,57 +639,8 @@ async function loadRiconciliazioni() {
         `;
     }
 
-    // ── Sezione unificata: Clienti Fine Mese / Prove Erogazione / Diversi ──
-    const infoRows = [];
-    const seenKeys = new Set();
-    for (const r of data) {
-        const key = `${r.data}__${r.impianto}`;
-        if (!seenKeys.has(key) && (r.prove_erogazione > 0 || r.clienti_fine_mese > 0 || r.diversi > 0)) {
-            seenKeys.add(key);
-            infoRows.push(r);
-        }
-    }
-
-    if (infoRows.length > 0) {
-        html += `
-        <div class="category-section" id="section-info-extra">
-            <h4 style="margin: 30px 0 10px 0; color: var(--text-primary); border-bottom: 2px solid var(--border-color); padding-bottom: 8px; display: flex; align-items: center; justify-content: space-between;">
-                <div style="display: flex; align-items: center; gap: 8px;">
-                    <span style="color: #e3b341;">●</span> Clienti Fine Mese / Prove Erogazione / Diversi
-                </div>
-                <button class="btn-toggle-section" onclick="toggleSection('wrapper-info-extra', this)" title="Nascondi/Mostra">
-                    👁️
-                </button>
-            </h4>
-            <div class="collapsible-wrapper" id="wrapper-info-extra">
-                <div class="table-container" style="margin-bottom: 20px; max-height: 400px; overflow-y: auto;">
-                    <table class="data-table">
-                        <thead>
-                            <tr>
-                                <th style="width: 120px;">Data</th>
-                                <th>Impianto</th>
-                                <th style="width: 160px; text-align: right;" title="Prove di erogazione">Prove Erogazione (€)</th>
-                                <th style="width: 170px; text-align: right;" title="Clienti con fatturazione a fine mese">Clienti Fine Mese (€)</th>
-                                <th style="width: 120px; text-align: right;">Diversi (€)</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${infoRows.map(r => `
-                                <tr>
-                                    <td>${r.data || '—'}</td>
-                                    <td style="font-weight: 500;">${r.impianto || '—'}</td>
-                                    <td style="text-align: right;">${r.prove_erogazione > 0 ? renderMoney(r.prove_erogazione) : '—'}</td>
-                                    <td style="text-align: right;">${r.clienti_fine_mese > 0 ? renderMoney(r.clienti_fine_mese) : '—'}</td>
-                                    <td style="text-align: right;">${r.diversi > 0 ? renderMoney(r.diversi) : '—'}</td>
-                                </tr>
-                            `).join('')}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
-        `;
-    }
+    // ── Sezione unificata (Rimossa in favore delle colonne in buoni) ──
+    // const infoRows = [];
 
     container.innerHTML = html;
 }
@@ -760,44 +722,50 @@ async function salvaModificheRic(id) {
 function esportaExcel() {
     const token = localStorage.getItem("access_token");
     if (!token) {
-        showToast("Errore di sessione: esegui nuovamente il login", "error");
+        showToast("Sessione scaduta: effettua di nuovo il login", "error");
         return;
     }
-    const da = document.getElementById('filterDa').value;
-    const a = document.getElementById('filterA').value;
-    const pv = document.getElementById('filterPv').value;
+    const da = document.getElementById('filterDa') ? document.getElementById('filterDa').value : '';
+    const a  = document.getElementById('filterA')  ? document.getElementById('filterA').value  : '';
+    const pv = document.getElementById('filterPv') ? document.getElementById('filterPv').value : '';
 
     let url = '/api/riconciliazioni/export/excel';
     let params = [];
     if (da) params.push(`da=${da}`);
-    if (a) params.push(`a=${a}`);
+    if (a)  params.push(`a=${a}`);
     if (pv) params.push(`pv=${pv}`);
     if (params.length > 0) url += '?' + params.join('&');
 
-    fetch(url, { 
+    showToast('⏳ Generazione Excel in corso...', 'info');
+
+    fetch(url, {
         cache: 'no-store',
         headers: { 'Authorization': 'Bearer ' + token }
     })
-        .then(response => {
-            if (!response.ok) throw new Error(`Errore generazione Excel (HTTP ${response.status})`);
-            return response.blob();
-        })
-        .then(blob => {
-            const blobUrl = window.URL.createObjectURL(blob);
-            const aElement = document.createElement('a');
-            aElement.style.display = 'none';
-            aElement.href = blobUrl;
-            const filename = `Riconciliazioni_${new Date().toISOString().split('T')[0]}.xlsx`;
-            aElement.download = filename;
-            document.body.appendChild(aElement);
-            aElement.click();
-            document.body.removeChild(aElement);
-            setTimeout(() => window.URL.revokeObjectURL(blobUrl), 1000);
-        })
-        .catch(err => {
-            console.error(err);
-            showToast("Impossibile esportare in Excel: " + err.message, "error");
-        });
+    .then(response => {
+        if (!response.ok) {
+            return response.text().then(txt => {
+                throw new Error(`HTTP ${response.status} — ${txt.substring(0, 200)}`);
+            });
+        }
+        return response.blob();
+    })
+    .then(blob => {
+        const blobUrl = window.URL.createObjectURL(blob);
+        const aEl = document.createElement('a');
+        aEl.style.display = 'none';
+        aEl.href = blobUrl;
+        aEl.download = `Riconciliazioni_${new Date().toISOString().split('T')[0]}.xlsx`;
+        document.body.appendChild(aEl);
+        aEl.click();
+        document.body.removeChild(aEl);
+        setTimeout(() => window.URL.revokeObjectURL(blobUrl), 2000);
+        showToast('✅ Excel scaricato!', 'success');
+    })
+    .catch(err => {
+        console.error('Excel export error:', err);
+        showToast('Errore Excel: ' + err.message, 'error');
+    });
 }
 
 function esportaPDF() {

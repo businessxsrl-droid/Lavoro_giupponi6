@@ -291,20 +291,39 @@ def get_riconciliazioni():
         WHERE 1=1
     '''
     params = []
+    query_f = '''
+        SELECT data, codice_pv, 
+               COALESCE(prove_erogazione, 0) AS prove_erogazione,
+               COALESCE(clienti_fine_mese, 0) AS clienti_fine_mese,
+               COALESCE(diversi, 0) AS diversi
+        FROM transazioni_fortech
+        WHERE 1=1
+    '''
+    params_f = []
+
     if da:
         query  += " AND r.data >= ?"
+        query_f += " AND data >= ?"
         params.append(da)
+        params_f.append(da)
     if a:
         query  += " AND r.data <= ?"
+        query_f += " AND data <= ?"
         params.append(a)
+        params_f.append(a)
     if pv:
         query  += " AND r.codice_pv = ?"
+        query_f += " AND codice_pv = ?"
         params.append(int(pv))
+        params_f.append(int(pv))
     query += " ORDER BY r.data DESC, r.codice_pv, r.categoria"
 
     conn = get_connection()
     rows = conn.execute(query, params).fetchall()
+    f_rows = conn.execute(query_f, params_f).fetchall()
     conn.close()
+    
+    f_map = { (f["data"], f["codice_pv"]): dict(f) if hasattr(f, 'keys') else f for f in f_rows }
 
     # Etichette leggibili per le categorie
     _CAT_LABEL = {
@@ -319,19 +338,27 @@ def get_riconciliazioni():
         "diversi":                 "Diversi",
     }
 
-    return jsonify([{
-        "id":               r["id"],
-        "data":             r["data"],
-        "impianto":         f"{r['codice_pv']} – {r['nome_pv'] or 'N/D'}",
-        "categoria":        r["categoria"],
-        "categoria_label":  _CAT_LABEL.get(r["categoria"], r["categoria"]),
-        "valore_fortech":   r["valore_teorico"],
-        "valore_reale":     r["valore_reale"],
-        "differenza":       r["differenza"],
-        "stato":            r["stato"],
-        "tipo_match":       r["tipo_match"] or "nessuno",
-        "note":             r["note"] or "",
-    } for r in rows])
+    records = []
+    for r in rows:
+        f_data = f_map.get((r["data"], r["codice_pv"]), {})
+        records.append({
+            "id":               r["id"],
+            "data":             r["data"],
+            "impianto":         f"{r['codice_pv']} – {r['nome_pv'] or 'N/D'}",
+            "categoria":        r["categoria"],
+            "categoria_label":  _CAT_LABEL.get(r["categoria"], r["categoria"]),
+            "valore_fortech":   r["valore_teorico"],
+            "valore_reale":     r["valore_reale"],
+            "differenza":       r["differenza"],
+            "stato":            r["stato"],
+            "tipo_match":       r["tipo_match"] or "nessuno",
+            "note":             r["note"] or "",
+            "prove_erogazione": float(f_data.get("prove_erogazione") or 0),
+            "clienti_fine_mese": float(f_data.get("clienti_fine_mese") or 0),
+            "diversi":          float(f_data.get("diversi") or 0)
+        })
+
+    return jsonify(records)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
