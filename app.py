@@ -502,18 +502,19 @@ def export_excel():
         f_data = f_map.get((r["data"], r["codice_pv"]), {})
             
         records.append({
-            "data":      r["data"],
-            "impianto":  f"{r['codice_pv']} - {r['impianto'] or 'N/D'}",
-            "categoria": _CAT_LABEL.get(r["categoria"], r["categoria"]),
-            "fortech":   float(r["valore_teorico"] or 0),
-            "reale":     float(r["valore_reale"]   or 0),
-            "diff":      float(r["differenza"]     or 0),
-            "stato_raw": r["stato"] or "",
-            "stato":     _STATO_LABEL.get(r["stato"] or "", r["stato"] or ""),
-            "note":      r["note"] or "",
-            "prove":     float(f_data.get("prove_erogazione") or 0),
-            "clienti":   float(f_data.get("clienti_fine_mese") or 0),
-            "diversi":   float(f_data.get("diversi") or 0),
+            "data":       r["data"],
+            "impianto":   f"{r['codice_pv']} - {r['impianto'] or 'N/D'}",
+            "categoria":  _CAT_LABEL.get(r["categoria"], r["categoria"]),
+            "fortech":    float(r["valore_teorico"] or 0),
+            "reale":      float(r["valore_reale"]   or 0),
+            "diff":       float(r["differenza"]     or 0),
+            "stato_raw":  r["stato"] or "",
+            "stato":      _STATO_LABEL.get(r["stato"] or "", r["stato"] or ""),
+            "note":       r["note"] or "",
+            "tipo_match": r["tipo_match"] or "nessuno",
+            "prove":      float(f_data.get("prove_erogazione") or 0),
+            "clienti":    float(f_data.get("clienti_fine_mese") or 0),
+            "diversi":    float(f_data.get("diversi") or 0),
         })
 
     import openpyxl
@@ -549,9 +550,10 @@ def export_excel():
     _AL_LEFT_WRAP = Alignment(horizontal="left",   vertical="center", wrap_text=True)
 
     HEADERS    = ["Data", "Impianto", "Categoria",
-                  "Fortech (EUR)", "Reale (EUR)", "Diff (EUR)", "Stato", 
-                  "Prove Erog.", "Clienti F.M.", "Diversi", "Note"]
-    COL_WIDTHS = [14, 36, 28, 14, 14, 12, 24, 14, 14, 14, 42]
+                  "Fortech (\u20ac)", "Reale (\u20ac)", "Diff (\u20ac)", "Stato",
+                  "Note", "Tipo Match",
+                  "Prove di erogazione (\u20ac)", "Clienti con fattura fine mese (\u20ac)", "Diversi (\u20ac)"]
+    COL_WIDTHS = [14, 36, 28, 14, 14, 12, 24, 42, 18, 22, 30, 14]
     NUM_COLS   = len(HEADERS)
     FMT_EUR    = "#,##0.00"
 
@@ -589,7 +591,7 @@ def export_excel():
             ri = cur_row + i
             is_last = (i == n - 1)
 
-            # A: Data, B: Impianto, H: Prove, I: Clienti, J: Diversi
+            # A: Data, B: Impianto, K: Prove, L: Clienti, M: Diversi
             if i == 0:
                 c1 = ws.cell(row=ri, column=1, value=rec["data"])
                 c1.font      = _FONT_GRP
@@ -598,8 +600,8 @@ def export_excel():
                 c2.font      = _FONT_GRP
                 c2.alignment = _AL_LEFT
                 
-                # H, I, J
-                for ci, key in [(8, "prove"), (9, "clienti"), (10, "diversi")]:
+                # col 10, 11, 12: Prove, Clienti, Diversi
+                for ci, key in [(10, "prove"), (11, "clienti"), (12, "diversi")]:
                     cx = ws.cell(row=ri, column=ci, value=rec[key])
                     cx.number_format = FMT_EUR
                     cx.font          = _FONT_GRP
@@ -630,9 +632,13 @@ def export_excel():
             if sf:
                 sc.fill = sf
 
-            nc = ws.cell(row=ri, column=11, value=rec["note"])
+            # col 8: Note, col 9: Tipo Match
+            nc = ws.cell(row=ri, column=8, value=rec["note"])
             nc.font      = _FONT_NORM
             nc.alignment = _AL_LEFT
+            tc = ws.cell(row=ri, column=9, value=rec["tipo_match"])
+            tc.font      = _FONT_NORM
+            tc.alignment = _AL_CTR
 
             for ci in range(1, NUM_COLS + 1):
                 cell = ws.cell(row=ri, column=ci)
@@ -644,14 +650,14 @@ def export_excel():
             ws.row_dimensions[ri].height = 16
 
         if n > 1:
-            for ci in [1, 2, 8, 9, 10]:
+            for ci in [1, 2, 10, 11, 12]:
                 rng = CellRange(min_col=ci, min_row=first, max_col=ci, max_row=last)
                 ws.merged_cells.add(rng)
             
             # Restore alignments for merged cells
             ws.cell(row=first, column=1).alignment = _AL_CTR_WRAP
             ws.cell(row=first, column=2).alignment = _AL_LEFT_WRAP
-            for ci in [8, 9, 10]:
+            for ci in [10, 11, 12]:
                 ws.cell(row=first, column=ci).alignment = _AL_CTR
 
         if grp_idx > 1:
@@ -679,7 +685,7 @@ def export_excel():
             c = ws.cell(row=tr, column=ci, value=sum(r[key] for r in records))
             c.number_format = FMT_EUR
             
-        for ci, key in [(8, "prove"), (9, "clienti"), (10, "diversi")]:
+        for ci, key in [(10, "prove"), (11, "clienti"), (12, "diversi")]:
             c = ws.cell(row=tr, column=ci, value=sum(r[key] for r in unique_groups))
             c.number_format = FMT_EUR
 
