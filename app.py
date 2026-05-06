@@ -495,12 +495,8 @@ def export_excel():
 
     records = []
     for r in rows:
-        # Non aggiungiamo prove/clienti/diversi come righe separate se per caso sono rimaste nel db
         if r["categoria"] in ("prove_erogazione", "clienti_fine_mese", "diversi"):
             continue
-            
-        f_data = f_map.get((r["data"], r["codice_pv"]), {})
-            
         records.append({
             "data":       r["data"],
             "impianto":   f"{r['codice_pv']} - {r['impianto'] or 'N/D'}",
@@ -512,9 +508,6 @@ def export_excel():
             "stato":      _STATO_LABEL.get(r["stato"] or "", r["stato"] or ""),
             "note":       r["note"] or "",
             "tipo_match": r["tipo_match"] or "nessuno",
-            "prove":      float(f_data.get("prove_erogazione") or 0),
-            "clienti":    float(f_data.get("clienti_fine_mese") or 0),
-            "diversi":    float(f_data.get("diversi") or 0),
         })
 
     import openpyxl
@@ -551,9 +544,8 @@ def export_excel():
 
     HEADERS    = ["Data", "Impianto", "Categoria",
                   "Fortech (\u20ac)", "Reale (\u20ac)", "Diff (\u20ac)", "Stato",
-                  "Note", "Tipo Match",
-                  "Prove di erogazione (\u20ac)", "Clienti con fattura fine mese (\u20ac)", "Diversi (\u20ac)"]
-    COL_WIDTHS = [14, 36, 28, 14, 14, 12, 24, 42, 18, 22, 30, 14]
+                  "Note", "Tipo Match"]
+    COL_WIDTHS = [14, 36, 28, 14, 14, 12, 24, 42, 18]
     NUM_COLS   = len(HEADERS)
     FMT_EUR    = "#,##0.00"
 
@@ -579,9 +571,29 @@ def export_excel():
     def _gk(r):
         return (r["data"], r["impianto"])
 
+    _EXTRA_CATS = [
+        ("prove_erogazione",  "Prove di erogazione"),
+        ("clienti_fine_mese", "Clienti con fattura fine mese"),
+        ("diversi",           "Diversi"),
+    ]
+    _FONT_EXTRA = Font(size=10, italic=True, color="555555", name="Calibri")
+
     for gk, git in _groupby(records, key=_gk):
         grp = list(git)
-        n   = len(grp)
+
+        # Calcola righe extra (prove/clienti/diversi) per questo gruppo
+        try:
+            pv_key = int(gk[1].split(" - ")[0])
+        except (ValueError, IndexError):
+            pv_key = None
+        fdata = f_map.get((gk[0], pv_key), {}) if pv_key is not None else {}
+        extra = [(label, float(fdata.get(fkey) or 0))
+                 for fkey, label in _EXTRA_CATS
+                 if float(fdata.get(fkey) or 0) != 0]
+
+        n_norm  = len(grp)
+        n_extra = len(extra)
+        n       = n_norm + n_extra
         grp_idx += 1
         fill_bg = _FILL_ODD if grp_idx % 2 else _FILL_EVEN
         first   = cur_row
@@ -589,7 +601,7 @@ def export_excel():
 
         for i, rec in enumerate(grp):
             ri = cur_row + i
-            is_last = (i == n - 1)
+            is_last = (i == n_norm - 1) and n_extra == 0
 
             # Col 1: Data, Col 2: Impianto — ripetuti in ogni riga per i filtri Excel
             c1 = ws.cell(row=ri, column=1, value=rec["data"])
@@ -598,14 +610,6 @@ def export_excel():
             c2 = ws.cell(row=ri, column=2, value=rec["impianto"])
             c2.font      = _FONT_GRP
             c2.alignment = _AL_LEFT
-
-            # Col 10-12: Prove/Clienti/Diversi — solo sulla prima riga del gruppo
-            if i == 0:
-                for ci, key in [(10, "prove"), (11, "clienti"), (12, "diversi")]:
-                    cx = ws.cell(row=ri, column=ci, value=rec[key])
-                    cx.number_format = FMT_EUR
-                    cx.font          = _FONT_GRP
-                    cx.alignment     = _AL_CTR
 
             ws.cell(row=ri, column=3, value=rec["categoria"]).font = _FONT_NORM
 
@@ -649,7 +653,28 @@ def export_excel():
 
             ws.row_dimensions[ri].height = 16
 
-        # Nessun merge: valori ripetuti per riga per compatibilità filtri Excel
+        # Righe extra: Prove di erogazione / Clienti fine mese / Diversi
+        for j, (label, val) in enumerate(extra):
+            ri      = cur_row + n_norm + j
+            is_last = (j == n_extra - 1)
+
+            c1 = ws.cell(row=ri, column=1, value=grp[0]["data"])
+            c1.font = _FONT_GRP; c1.alignment = _AL_CTR
+            c2 = ws.cell(row=ri, column=2, value=grp[0]["impianto"])
+            c2.font = _FONT_GRP; c2.alignment = _AL_LEFT
+
+            c3 = ws.cell(row=ri, column=3, value=label)
+            c3.font = _FONT_EXTRA; c3.alignment = _AL_LEFT
+
+            c4 = ws.cell(row=ri, column=4, value=val)
+            c4.number_format = FMT_EUR
+            c4.font = _FONT_EXTRA; c4.alignment = _AL_CTR
+
+            for ci in range(1, NUM_COLS + 1):
+                ws.cell(row=ri, column=ci).fill = fill_bg
+                if not is_last:
+                    ws.cell(row=ri, column=ci).border = _BORDER_INNER
+            ws.row_dimensions[ri].height = 16
 
         if grp_idx > 1:
             for ci in range(1, NUM_COLS + 1):
@@ -668,16 +693,9 @@ def export_excel():
             cell.alignment = _AL_CTR
             cell.border    = Border(top=_THICK)
         ws.cell(row=tr, column=3, value="TOTALE GENERALE")
-        
-        # Calculate sum for unique groups to avoid summing merged cells multiple times
-        unique_groups = { (r["data"], r["impianto"]): r for r in records }.values()
 
         for ci, key in [(4, "fortech"), (5, "reale"), (6, "diff")]:
             c = ws.cell(row=tr, column=ci, value=sum(r[key] for r in records))
-            c.number_format = FMT_EUR
-            
-        for ci, key in [(10, "prove"), (11, "clienti"), (12, "diversi")]:
-            c = ws.cell(row=tr, column=ci, value=sum(r[key] for r in unique_groups))
             c.number_format = FMT_EUR
 
         ws.row_dimensions[tr].height = 18

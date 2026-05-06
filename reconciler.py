@@ -299,6 +299,10 @@ def _reconcile_buoni_petrolifere_combined(conn, df_f: pd.DataFrame, tol: float, 
     return count
 
 
+# PV per cui totale_petrolifere in Fortech include già clienti_fine_mese (da sottrarre)
+_PVS_PETRO_SUBTRACT_CLIENTI = {49788}  # Taleggio
+
+
 def _reconcile_petrolifere(conn, df_f: pd.DataFrame, tol: float, exclude_pvs: set = None) -> int:
     """Riconcilia le carte petrolifere vs Fortech."""
     cols = ["codice_pv", "data", "reale"]
@@ -308,7 +312,7 @@ def _reconcile_petrolifere(conn, df_f: pd.DataFrame, tol: float, exclude_pvs: se
         "GROUP BY codice_pv, data", cols)
 
     df_src = df_f[~df_f["codice_pv"].isin(exclude_pvs)].copy() if exclude_pvs else df_f.copy()
-    m = df_src[["codice_pv", "data", "totale_petrolifere"]].copy()
+    m = df_src[["codice_pv", "data", "totale_petrolifere", "clienti_fine_mese"]].copy()
     if not df_reale.empty:
         m = m.merge(df_reale, on=["codice_pv", "data"], how="left")
     else:
@@ -318,15 +322,17 @@ def _reconcile_petrolifere(conn, df_f: pd.DataFrame, tol: float, exclude_pvs: se
     params = []
     for _, row in m.iterrows():
         teorico = float(row["totale_petrolifere"])
+        if int(row["codice_pv"]) in _PVS_PETRO_SUBTRACT_CLIENTI:
+            teorico = max(0.0, teorico - float(row["clienti_fine_mese"]))
         reale   = float(row["reale"])
         stato   = _calcola_stato(teorico, reale, tol)
         if stato:
             diff = round(reale - teorico, 2)
             params.append((int(row["codice_pv"]), row["data"], "carte_petrolifere", teorico, reale, diff, stato, "nessuno", ""))
 
-
-    
     conn.executemany(_SQL_UPSERT, params)
+    count = len(params)
+    print(f"  [petrolifere]   {count} record")
     return count
 # ═══════════════════════════════════════════════════════════════════════════════
 #  RICONCILIAZIONE PRINCIPALE
