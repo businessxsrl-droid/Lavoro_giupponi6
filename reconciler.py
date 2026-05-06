@@ -298,7 +298,8 @@ def _reconcile_buoni_petrolifere_combined(conn, df_f: pd.DataFrame, tol: float, 
 
 def _reconcile_prove_clienti_diversi(conn, df_f: pd.DataFrame) -> int:
     """Crea record informativi per prove_erogazione, clienti_fine_mese, diversi.
-    Non esiste fonte esterna: reale = teorico, diff = 0, stato = QUADRATO.
+    Non esiste fonte esterna: valore_teorico=0, valore_reale=importo Fortech.
+    tipo_match='informativo' le distingue dalle categorie riconciliate.
     """
     cats = [
         ("prove_erogazione",  "prove_erogazione"),
@@ -314,7 +315,7 @@ def _reconcile_prove_clienti_diversi(conn, df_f: pd.DataFrame) -> int:
             if val <= 0:
                 continue
             params.append((int(row["codice_pv"]), row["data"], cat,
-                           val, val, 0.0, "QUADRATO", "nessuno", ""))
+                           0.0, val, 0.0, "QUADRATO", "informativo", ""))
     conn.executemany(_SQL_UPSERT, params)
     count = len(params)
     print(f"  [prove/clienti/diversi] {count} record")

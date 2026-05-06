@@ -525,7 +525,7 @@ def export_excel():
     _AL_LEFT_WRAP = Alignment(horizontal="left",   vertical="center", wrap_text=True)
 
     HEADERS    = ["Data", "Impianto", "Categoria",
-                  "Fortech (\u20ac)", "Reale (\u20ac)", "Diff (\u20ac)", "Stato",
+                  "Fortech (\u20ac)", "Reale / Importo (\u20ac)", "Diff (\u20ac)", "Stato",
                   "Note", "Tipo Match"]
     COL_WIDTHS = [14, 36, 28, 14, 14, 12, 24, 42, 18]
     NUM_COLS   = len(HEADERS)
@@ -575,36 +575,46 @@ def export_excel():
 
             ws.cell(row=ri, column=3, value=rec["categoria"]).font = _FONT_NORM
 
-            for ci, key in [(4, "fortech"), (5, "reale")]:
-                c = ws.cell(row=ri, column=ci, value=rec[key])
-                c.number_format = FMT_EUR
-                c.alignment     = _AL_CTR
-                c.font          = _FONT_NORM
+            is_info = rec["tipo_match"] == "informativo"
 
-            cf = ws.cell(row=ri, column=6, value=rec["diff"])
-            cf.number_format = FMT_EUR
-            cf.alignment     = _AL_CTR
-            if rec["diff"] < -0.01:
-                cf.font = _FONT_DIFF_NEG
-            elif rec["diff"] > 0.01:
-                cf.font = _FONT_DIFF_POS
+            if is_info:
+                # Voce informativa: nessun Fortech, solo importo in col 5
+                c5 = ws.cell(row=ri, column=5, value=rec["reale"])
+                c5.number_format = FMT_EUR
+                c5.alignment     = _AL_CTR
+                c5.font          = _FONT_NORM
             else:
-                cf.font = _FONT_NORM
+                for ci, key in [(4, "fortech"), (5, "reale")]:
+                    c = ws.cell(row=ri, column=ci, value=rec[key])
+                    c.number_format = FMT_EUR
+                    c.alignment     = _AL_CTR
+                    c.font          = _FONT_NORM
 
-            sc = ws.cell(row=ri, column=7, value=rec["stato"])
-            sc.font      = _FONT_STATO
-            sc.alignment = _AL_CTR
-            sf = _FILL_STATO.get(rec["stato_raw"])
-            if sf:
-                sc.fill = sf
+                cf = ws.cell(row=ri, column=6, value=rec["diff"])
+                cf.number_format = FMT_EUR
+                cf.alignment     = _AL_CTR
+                if rec["diff"] < -0.01:
+                    cf.font = _FONT_DIFF_NEG
+                elif rec["diff"] > 0.01:
+                    cf.font = _FONT_DIFF_POS
+                else:
+                    cf.font = _FONT_NORM
+
+                sc = ws.cell(row=ri, column=7, value=rec["stato"])
+                sc.font      = _FONT_STATO
+                sc.alignment = _AL_CTR
+                sf = _FILL_STATO.get(rec["stato_raw"])
+                if sf:
+                    sc.fill = sf
 
             # col 8: Note, col 9: Tipo Match
             nc = ws.cell(row=ri, column=8, value=rec["note"])
             nc.font      = _FONT_NORM
             nc.alignment = _AL_LEFT
-            tc = ws.cell(row=ri, column=9, value=rec["tipo_match"])
-            tc.font      = _FONT_NORM
-            tc.alignment = _AL_CTR
+            if not is_info:
+                tc = ws.cell(row=ri, column=9, value=rec["tipo_match"])
+                tc.font      = _FONT_NORM
+                tc.alignment = _AL_CTR
 
             for ci in range(1, NUM_COLS + 1):
                 cell = ws.cell(row=ri, column=ci)
@@ -633,9 +643,12 @@ def export_excel():
             cell.border    = Border(top=_THICK)
         ws.cell(row=tr, column=3, value="TOTALE GENERALE")
 
-        for ci, key in [(4, "fortech"), (5, "reale"), (6, "diff")]:
-            c = ws.cell(row=tr, column=ci, value=sum(r[key] for r in records))
+        norm_records = [r for r in records if r["tipo_match"] != "informativo"]
+        for ci, key in [(4, "fortech"), (6, "diff")]:
+            c = ws.cell(row=tr, column=ci, value=sum(r[key] for r in norm_records))
             c.number_format = FMT_EUR
+        c5 = ws.cell(row=tr, column=5, value=sum(r["reale"] for r in records))
+        c5.number_format = FMT_EUR
 
         ws.row_dimensions[tr].height = 18
 
