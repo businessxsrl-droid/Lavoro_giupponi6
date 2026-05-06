@@ -558,10 +558,12 @@ async function loadRiconciliazioni() {
         return;
     }
 
+    const CATEGORIE_INFORMATIVE = ['prove_erogazione', 'clienti_fine_mese', 'diversi'];
     const categorie = [...new Set(data.map(r => r.categoria))];
     let html = '';
 
     for (const cat of categorie) {
+        if (CATEGORIE_INFORMATIVE.includes(cat)) continue;
         const catData = data.filter(r => r.categoria === cat);
         const catLabel = CATEGORY_LABELS[cat] ? CATEGORY_LABELS[cat].label : cat;
 
@@ -586,11 +588,6 @@ async function loadRiconciliazioni() {
                                 <th style="width: 120px; text-align: right;">Reale (€)</th>
                                 <th style="width: 120px; text-align: right;">Diff (€)</th>
                                 <th style="width: 130px;">Stato</th>
-                                ${cat === 'buoni' ? `
-                                <th style="width: 90px; text-align: right;" title="Prove di erogazione">Prove Erog.</th>
-                                <th style="width: 90px; text-align: right;" title="Clienti con fatturazione a fine mese">Clienti F.M.</th>
-                                <th style="width: 90px; text-align: right;">Diversi</th>
-                                ` : ''}
                                 <th style="width: 200px;">Note</th>
                                 <th style="width: 70px; text-align: center;">Azioni</th>
                             </tr>
@@ -613,12 +610,6 @@ async function loadRiconciliazioni() {
                                         ${r.tipo_match && r.tipo_match !== 'nessuno' ? `<span style="margin-left:5px; cursor:help;" title="${TIPO_MATCH_LABELS[r.tipo_match]?.label || r.tipo_match}">${TIPO_MATCH_LABELS[r.tipo_match]?.icon || ''}</span>` : ''}
                                     </td>
                                     
-                                    ${cat === 'buoni' ? `
-                                    <td style="text-align: right; font-size: 13px; color: var(--text-secondary);">${r.prove_erogazione > 0 ? renderMoney(r.prove_erogazione) : '—'}</td>
-                                    <td style="text-align: right; font-size: 13px; color: var(--text-secondary);">${r.clienti_fine_mese > 0 ? renderMoney(r.clienti_fine_mese) : '—'}</td>
-                                    <td style="text-align: right; font-size: 13px; color: var(--text-secondary);">${r.diversi > 0 ? renderMoney(r.diversi) : '—'}</td>
-                                    ` : ''}
-
                                     <td style="font-size: 11px; color: var(--text-secondary); line-height: 1.4;">
                                         <span class="val-note-text" id="note-txt-${r.id}">${r.note || ''}</span>
                                         <input type="text" class="edit-input edit-note" id="note-inp-${r.id}" value="${r.note || ''}" style="display:none; width:100%">
@@ -639,8 +630,59 @@ async function loadRiconciliazioni() {
         `;
     }
 
-    // ── Sezione unificata (Rimossa in favore delle colonne in buoni) ──
-    // const infoRows = [];
+    // ── Sezione Deduzioni Fortech (Prove Erog. / Clienti F.M. / Diversi) ──
+    const infoMap = {};
+    for (const r of data) {
+        const key = `${r.data}|${r.impianto}`;
+        if (!infoMap[key] && (r.prove_erogazione > 0 || r.clienti_fine_mese > 0 || r.diversi > 0)) {
+            infoMap[key] = {
+                data: r.data,
+                impianto: r.impianto,
+                prove: r.prove_erogazione || 0,
+                clienti: r.clienti_fine_mese || 0,
+                diversi: r.diversi || 0,
+            };
+        }
+    }
+    const infoRows = Object.values(infoMap).sort((a, b) => b.data.localeCompare(a.data));
+
+    if (infoRows.length > 0) {
+        html += `
+        <div class="category-section" id="section-deduzioni">
+            <h4 style="margin: 30px 0 10px 0; color: var(--text-primary); border-bottom: 2px solid var(--border-color); padding-bottom: 8px; display: flex; align-items: center; justify-content: space-between;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="color:#e8a838;">●</span> Deduzioni Fortech
+                </div>
+                <button class="btn-toggle-section" onclick="toggleSection('wrapper-deduzioni', this)" title="Nascondi/Mostra">👁️</button>
+            </h4>
+            <div class="collapsible-wrapper" id="wrapper-deduzioni">
+                <div class="table-container" style="margin-bottom: 20px; max-height: 400px; overflow-y: auto;">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th style="width: 120px;">Data</th>
+                                <th>Impianto</th>
+                                <th style="width: 140px; text-align: right;" title="Prove di erogazione">Prove Erogazione</th>
+                                <th style="width: 140px; text-align: right;" title="Clienti con fattura fine mese">Clienti F.M.</th>
+                                <th style="width: 120px; text-align: right;">Diversi</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${infoRows.map(r => `
+                            <tr>
+                                <td>${r.data || '—'}</td>
+                                <td style="font-weight: 500;">${r.impianto || '—'}</td>
+                                <td style="text-align: right; color: var(--text-secondary);">${r.prove > 0 ? renderMoney(r.prove) : '—'}</td>
+                                <td style="text-align: right; color: var(--text-secondary);">${r.clienti > 0 ? renderMoney(r.clienti) : '—'}</td>
+                                <td style="text-align: right; color: var(--text-secondary);">${r.diversi > 0 ? renderMoney(r.diversi) : '—'}</td>
+                            </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>`;
+    }
 
     container.innerHTML = html;
 }
