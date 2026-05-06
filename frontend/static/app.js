@@ -630,12 +630,55 @@ async function loadRiconciliazioni() {
         `;
     }
 
-    // ── Sezione Altro Fortech (Prove Erog. / Clienti F.M. / Diversi) ──
-    const infoRecords = data
-        .filter(r => CATEGORIE_INFORMATIVE.includes(r.categoria))
-        .sort((a, b) => b.data.localeCompare(a.data) || (a.impianto || '').localeCompare(b.impianto || ''));
+    // ── Sezione Altro Fortech — pivot per (data, impianto) ──
+    window._infoPivotData = {};
+    const pivotMap = {};
+    for (const r of data) {
+        if (!CATEGORIE_INFORMATIVE.includes(r.categoria)) continue;
+        const key = `${r.data}||${r.impianto}`;
+        if (!pivotMap[key]) {
+            pivotMap[key] = { data: r.data, impianto: r.impianto,
+                prove: 0, clienti: 0, diversi: 0, note: '',
+                proveId: null, proveVal: 0,
+                clientiId: null, clientiVal: 0,
+                diversiId: null, diversiVal: 0 };
+        }
+        const p = pivotMap[key];
+        if (r.categoria === 'prove_erogazione')  { p.prove   = r.valore_reale; p.proveId   = r.id; p.proveVal   = r.valore_reale; }
+        if (r.categoria === 'clienti_fine_mese') { p.clienti = r.valore_reale; p.clientiId = r.id; p.clientiVal = r.valore_reale; }
+        if (r.categoria === 'diversi')           { p.diversi = r.valore_reale; p.diversiId = r.id; p.diversiVal = r.valore_reale; }
+        if (!p.note && r.note) p.note = r.note;
+    }
+    const infoRows = Object.values(pivotMap)
+        .filter(r => r.prove > 0 || r.clienti > 0 || r.diversi > 0)
+        .sort((a, b) => b.data.localeCompare(a.data));
 
-    if (infoRecords.length > 0) {
+    if (infoRows.length > 0) {
+        const infoRowsHtml = infoRows.map((r, idx) => {
+            window._infoPivotData[idx] = [
+                r.proveId   ? { id: r.proveId,   val: r.proveVal   } : null,
+                r.clientiId ? { id: r.clientiId, val: r.clientiVal } : null,
+                r.diversiId ? { id: r.diversiId, val: r.diversiVal } : null,
+            ].filter(Boolean);
+            return `
+            <tr>
+                <td>${r.data || '—'}</td>
+                <td style="font-weight: 500;">${r.impianto || '—'}</td>
+                <td style="text-align: right; color: var(--text-secondary);">${r.prove   > 0 ? renderMoney(r.prove)   : '—'}</td>
+                <td style="text-align: right; color: var(--text-secondary);">${r.clienti > 0 ? renderMoney(r.clienti) : '—'}</td>
+                <td style="text-align: right; color: var(--text-secondary);">${r.diversi > 0 ? renderMoney(r.diversi) : '—'}</td>
+                <td style="font-size: 11px; color: var(--text-secondary); line-height: 1.4;">
+                    <span id="info-note-txt-${idx}">${r.note || ''}</span>
+                    <input type="text" id="info-note-inp-${idx}" value="${r.note || ''}" style="display:none; width:100%">
+                </td>
+                <td style="text-align: center;">
+                    <button class="btn-action btn-edit"   id="info-btn-edit-${idx}"   onclick="toggleEditInfo(${idx})" title="Modifica">✏️</button>
+                    <button class="btn-action btn-save"   id="info-btn-save-${idx}"   onclick="salvaInfoNote(${idx})"  style="display:none" title="Salva">💾</button>
+                    <button class="btn-action btn-cancel" id="info-btn-cancel-${idx}" onclick="toggleEditInfo(${idx})" style="display:none" title="Annulla">❌</button>
+                </td>
+            </tr>`;
+        }).join('');
+
         html += `
         <div class="category-section" id="section-deduzioni">
             <h4 style="margin: 30px 0 10px 0; color: var(--text-primary); border-bottom: 2px solid var(--border-color); padding-bottom: 8px; display: flex; align-items: center; justify-content: space-between;">
@@ -651,31 +694,14 @@ async function loadRiconciliazioni() {
                             <tr>
                                 <th style="width: 120px;">Data</th>
                                 <th>Impianto</th>
-                                <th style="width: 180px;">Categoria</th>
-                                <th style="width: 130px; text-align: right;">Importo (€)</th>
+                                <th style="width: 140px; text-align: right;" title="Prove di erogazione">Prove Erogazione</th>
+                                <th style="width: 120px; text-align: right;" title="Clienti con fattura fine mese">Clienti F.M.</th>
+                                <th style="width: 100px; text-align: right;">Diversi</th>
                                 <th style="width: 200px;">Note</th>
                                 <th style="width: 70px; text-align: center;">Azioni</th>
                             </tr>
                         </thead>
-                        <tbody>
-                            ${infoRecords.map(r => `
-                            <tr id="row-info-${r.id}">
-                                <td>${r.data || '—'}</td>
-                                <td style="font-weight: 500;">${r.impianto || '—'}</td>
-                                <td style="color: var(--text-secondary); font-size: 13px;">${r.categoria_label || r.categoria}</td>
-                                <td style="text-align: right;">${renderMoney(r.valore_reale)}</td>
-                                <td style="font-size: 11px; color: var(--text-secondary); line-height: 1.4;">
-                                    <span id="info-note-txt-${r.id}">${r.note || ''}</span>
-                                    <input type="text" id="info-note-inp-${r.id}" value="${r.note || ''}" style="display:none; width:100%">
-                                </td>
-                                <td style="text-align: center;">
-                                    <button class="btn-action btn-edit" id="info-btn-edit-${r.id}" onclick="toggleEditInfo(${r.id})" title="Modifica">✏️</button>
-                                    <button class="btn-action btn-save" id="info-btn-save-${r.id}" onclick="salvaInfoNote(${r.id}, ${r.valore_reale})" style="display:none" title="Salva">💾</button>
-                                    <button class="btn-action btn-cancel" id="info-btn-cancel-${r.id}" onclick="toggleEditInfo(${r.id})" style="display:none" title="Annulla">❌</button>
-                                </td>
-                            </tr>
-                            `).join('')}
-                        </tbody>
+                        <tbody>${infoRowsHtml}</tbody>
                     </table>
                 </div>
             </div>
@@ -699,28 +725,30 @@ function toggleSection(wrapperId, btn) {
     }
 }
 
-function toggleEditInfo(id) {
-    const inp = document.getElementById(`info-note-inp-${id}`);
+function toggleEditInfo(idx) {
+    const inp = document.getElementById(`info-note-inp-${idx}`);
     const isEditing = inp.style.display === 'block';
-    document.getElementById(`info-note-txt-${id}`).style.display = isEditing ? 'inline' : 'none';
+    document.getElementById(`info-note-txt-${idx}`).style.display = isEditing ? 'inline' : 'none';
     inp.style.display = isEditing ? 'none' : 'block';
-    document.getElementById(`info-btn-edit-${id}`).style.display = isEditing ? 'inline-block' : 'none';
-    document.getElementById(`info-btn-save-${id}`).style.display = isEditing ? 'none' : 'inline-block';
-    document.getElementById(`info-btn-cancel-${id}`).style.display = isEditing ? 'none' : 'inline-block';
+    document.getElementById(`info-btn-edit-${idx}`).style.display = isEditing ? 'inline-block' : 'none';
+    document.getElementById(`info-btn-save-${idx}`).style.display = isEditing ? 'none' : 'inline-block';
+    document.getElementById(`info-btn-cancel-${idx}`).style.display = isEditing ? 'none' : 'inline-block';
 }
 
-async function salvaInfoNote(id, valoreReale) {
-    const newNote = document.getElementById(`info-note-inp-${id}`).value;
+async function salvaInfoNote(idx) {
+    const newNote = document.getElementById(`info-note-inp-${idx}`).value;
+    const items = window._infoPivotData[idx] || [];
+    if (!items.length) return;
     try {
-        const result = await apiFetch('/api/riconciliazioni/edit', {
-            method: 'POST',
-            body: JSON.stringify({ id: id, valore_reale: valoreReale, note: newNote })
-        });
-        if (result) {
-            document.getElementById(`info-note-txt-${id}`).textContent = newNote;
-            toggleEditInfo(id);
-            showToast("Nota aggiornata", "success");
+        for (const { id, val } of items) {
+            await apiFetch('/api/riconciliazioni/edit', {
+                method: 'POST',
+                body: JSON.stringify({ id, valore_reale: val, note: newNote })
+            });
         }
+        document.getElementById(`info-note-txt-${idx}`).textContent = newNote;
+        toggleEditInfo(idx);
+        showToast("Nota aggiornata", "success");
     } catch(e) {
         showToast("Errore salvataggio nota", "error");
     }
