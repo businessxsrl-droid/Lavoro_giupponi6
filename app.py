@@ -613,11 +613,11 @@ def export_excel():
             is_info = rec["tipo_match"] == "informativo"
 
             if is_info:
-                # Voce informativa: nessun Fortech, solo importo in col 5
-                c5 = ws.cell(row=ri, column=5, value=rec["reale"])
-                c5.number_format = FMT_EUR
-                c5.alignment     = _AL_CTR
-                c5.font          = _FONT_NORM
+                # Voce informativa: importo in col 4 (Fortech), resto vuoto
+                c4 = ws.cell(row=ri, column=4, value=rec["reale"])
+                c4.number_format = FMT_EUR
+                c4.alignment     = _AL_CTR
+                c4.font          = _FONT_NORM
             else:
                 for ci, key in [(4, "fortech"), (5, "reale")]:
                     c = ws.cell(row=ri, column=ci, value=rec[key])
