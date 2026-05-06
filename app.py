@@ -441,41 +441,22 @@ def export_excel():
         WHERE 1=1
     """
     params = []
-    
-    query_f = """
-        SELECT data, codice_pv, 
-               COALESCE(prove_erogazione, 0) AS prove_erogazione,
-               COALESCE(clienti_fine_mese, 0) AS clienti_fine_mese,
-               COALESCE(diversi, 0) AS diversi
-        FROM transazioni_fortech
-        WHERE 1=1
-    """
-    params_f = []
 
     if da:
         query += " AND r.data >= ?"
-        query_f += " AND data >= ?"
         params.append(da)
-        params_f.append(da)
     if a:
         query += " AND r.data <= ?"
-        query_f += " AND data <= ?"
         params.append(a)
-        params_f.append(a)
     if pv:
         query += " AND r.codice_pv = ?"
-        query_f += " AND codice_pv = ?"
         params.append(int(pv))
-        params_f.append(int(pv))
-        
+
     query += " ORDER BY r.data DESC, i.nome, r.categoria"
 
     conn = get_connection()
     rows = conn.execute(query, params).fetchall()
-    f_rows = conn.execute(query_f, params_f).fetchall()
     conn.close()
-
-    f_map = { (f["data"], f["codice_pv"]): dict(f) if hasattr(f, 'keys') else f for f in f_rows }
 
     _CAT_LABEL = {
         "carte_bancarie":             "Carte bancarie (POS)",
@@ -483,7 +464,10 @@ def export_excel():
         "buoni":                      "Buoni / Voucher",
         "carte_petrolifere":          "Carte petrolifere",
         "buoni_petrolifere":          "Buoni + Petrolifere",
-        "buoni_petrolifere_combined": "Buoni + Petrolifere (combinato)"
+        "buoni_petrolifere_combined": "Buoni + Petrolifere (combinato)",
+        "prove_erogazione":           "Prove di erogazione",
+        "clienti_fine_mese":          "Clienti fine mese",
+        "diversi":                    "Diversi",
     }
     _STATO_LABEL = {
         "QUADRATO":       "OK - Quadrato",
@@ -495,8 +479,6 @@ def export_excel():
 
     records = []
     for r in rows:
-        if r["categoria"] in ("prove_erogazione", "clienti_fine_mese", "diversi"):
-            continue
         records.append({
             "data":       r["data"],
             "impianto":   f"{r['codice_pv']} - {r['impianto'] or 'N/D'}",
@@ -571,29 +553,9 @@ def export_excel():
     def _gk(r):
         return (r["data"], r["impianto"])
 
-    _EXTRA_CATS = [
-        ("prove_erogazione",  "Prove di erogazione"),
-        ("clienti_fine_mese", "Clienti con fattura fine mese"),
-        ("diversi",           "Diversi"),
-    ]
-    _FONT_EXTRA = Font(size=10, italic=True, color="555555", name="Calibri")
-
     for gk, git in _groupby(records, key=_gk):
         grp = list(git)
-
-        # Calcola righe extra (prove/clienti/diversi) per questo gruppo
-        try:
-            pv_key = int(gk[1].split(" - ")[0])
-        except (ValueError, IndexError):
-            pv_key = None
-        fdata = f_map.get((gk[0], pv_key), {}) if pv_key is not None else {}
-        extra = [(label, float(fdata.get(fkey) or 0))
-                 for fkey, label in _EXTRA_CATS
-                 if float(fdata.get(fkey) or 0) != 0]
-
-        n_norm  = len(grp)
-        n_extra = len(extra)
-        n       = n_norm + n_extra
+        n   = len(grp)
         grp_idx += 1
         fill_bg = _FILL_ODD if grp_idx % 2 else _FILL_EVEN
         first   = cur_row
@@ -601,7 +563,7 @@ def export_excel():
 
         for i, rec in enumerate(grp):
             ri = cur_row + i
-            is_last = (i == n_norm - 1) and n_extra == 0
+            is_last = (i == n - 1)
 
             # Col 1: Data, Col 2: Impianto — ripetuti in ogni riga per i filtri Excel
             c1 = ws.cell(row=ri, column=1, value=rec["data"])
@@ -651,29 +613,6 @@ def export_excel():
                 if not is_last:
                     cell.border = _BORDER_INNER
 
-            ws.row_dimensions[ri].height = 16
-
-        # Righe extra: Prove di erogazione / Clienti fine mese / Diversi
-        for j, (label, val) in enumerate(extra):
-            ri      = cur_row + n_norm + j
-            is_last = (j == n_extra - 1)
-
-            c1 = ws.cell(row=ri, column=1, value=grp[0]["data"])
-            c1.font = _FONT_GRP; c1.alignment = _AL_CTR
-            c2 = ws.cell(row=ri, column=2, value=grp[0]["impianto"])
-            c2.font = _FONT_GRP; c2.alignment = _AL_LEFT
-
-            c3 = ws.cell(row=ri, column=3, value=label)
-            c3.font = _FONT_EXTRA; c3.alignment = _AL_LEFT
-
-            c4 = ws.cell(row=ri, column=4, value=val)
-            c4.number_format = FMT_EUR
-            c4.font = _FONT_EXTRA; c4.alignment = _AL_CTR
-
-            for ci in range(1, NUM_COLS + 1):
-                ws.cell(row=ri, column=ci).fill = fill_bg
-                if not is_last:
-                    ws.cell(row=ri, column=ci).border = _BORDER_INNER
             ws.row_dimensions[ri].height = 16
 
         if grp_idx > 1:

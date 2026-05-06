@@ -240,7 +240,7 @@ def _reconcile_buoni(conn, df_f: pd.DataFrame, tol: float, exclude_pvs: set = No
 
 def _reconcile_buoni_petrolifere_combined(conn, df_f: pd.DataFrame, tol: float, pvs: set) -> int:
     """Per impianti senza servizio: reconcilia buoni+petrolifere come unica categoria.
-    Include anche prove_erogazione, clienti_fine_mese e diversi nel teorico.
+    Prove_erogazione, clienti_fine_mese e diversi sono gestiti da _reconcile_prove_clienti_diversi.
     """
     if not pvs:
         return 0
@@ -248,10 +248,7 @@ def _reconcile_buoni_petrolifere_combined(conn, df_f: pd.DataFrame, tol: float, 
     if df_ss.empty:
         return 0
 
-    extra_cols = [c for c in ("prove_erogazione", "clienti_fine_mese", "diversi") if c in df_ss.columns]
     df_ss["teorico"] = df_ss["totale_buoni"] + df_ss["totale_petrolifere"]
-    for c in extra_cols:
-        df_ss["teorico"] += pd.to_numeric(df_ss[c], errors="coerce").fillna(0.0)
 
     cols = ["codice_pv", "data", "reale"]
     df_buoni = _to_df(conn,
@@ -296,6 +293,31 @@ def _reconcile_buoni_petrolifere_combined(conn, df_f: pd.DataFrame, tol: float, 
     conn.executemany(_SQL_UPSERT, params)
     count = len(params)
     print(f"  [buoni_petrolifere] {count} record (impianti senza servizio)")
+    return count
+
+
+def _reconcile_prove_clienti_diversi(conn, df_f: pd.DataFrame) -> int:
+    """Crea record informativi per prove_erogazione, clienti_fine_mese, diversi.
+    Non esiste fonte esterna: reale = teorico, diff = 0, stato = QUADRATO.
+    """
+    cats = [
+        ("prove_erogazione",  "prove_erogazione"),
+        ("clienti_fine_mese", "clienti_fine_mese"),
+        ("diversi",           "diversi"),
+    ]
+    params = []
+    for col, cat in cats:
+        if col not in df_f.columns:
+            continue
+        for _, row in df_f.iterrows():
+            val = round(float(pd.to_numeric(row[col], errors="coerce") or 0), 2)
+            if val <= 0:
+                continue
+            params.append((int(row["codice_pv"]), row["data"], cat,
+                           val, val, 0.0, "QUADRATO", "nessuno", ""))
+    conn.executemany(_SQL_UPSERT, params)
+    count = len(params)
+    print(f"  [prove/clienti/diversi] {count} record")
     return count
 
 
@@ -395,6 +417,11 @@ def reconcile(conn=None) -> int:
         inserted += _reconcile_buoni_petrolifere_combined(conn, df_f, tol["buoni"], pvs=senza_servizio_pvs)
     except Exception as e:
         print(f"  [ERR] buoni_petrolifere_combined: {e}")
+
+    try:
+        inserted += _reconcile_prove_clienti_diversi(conn, df_f)
+    except Exception as e:
+        print(f"  [ERR] prove_clienti_diversi: {e}")
 
 
 
