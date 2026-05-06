@@ -754,6 +754,16 @@ async function salvaInfoNote(idx) {
     }
 }
 
+async function migraInformativo() {
+    try {
+        const res = await apiFetch('/api/admin/migra_informativo', { method: 'POST' });
+        showToast(res.message || 'Aggiornamento completato', 'success');
+        loadRiconciliazioni();
+    } catch(e) {
+        showToast('Errore aggiornamento Altro Fortech', 'error');
+    }
+}
+
 function toggleEditRic(id) {
     const isEditing = document.getElementById(`reale-inp-${id}`).style.display === 'block';
 

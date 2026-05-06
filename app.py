@@ -62,7 +62,9 @@ def login_page():
 
 @app.route("/static/<path:path>")
 def send_static(path):
-    return send_from_directory(STATIC_DIR, path)
+    response = send_from_directory(STATIC_DIR, path)
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    return response
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1275,6 +1277,50 @@ def verifica_stats():
     """).fetchall()
     conn.close()
     return jsonify({r['stato']: {'count': r['n'], 'esposizione': float(r['esposizione'] or 0)} for r in rows})
+
+
+@app.route("/api/admin/migra_informativo", methods=["POST"])
+@jwt_required()
+def migra_informativo():
+    """Popola i record informativo (prove/clienti/diversi) dai dati transazioni_fortech esistenti."""
+    conn = get_connection()
+    rows = conn.execute("""
+        SELECT tf.codice_pv, tf.data,
+               COALESCE(tf.prove_erogazione, 0)  AS prove_erogazione,
+               COALESCE(tf.clienti_fine_mese, 0) AS clienti_fine_mese,
+               COALESCE(tf.diversi, 0)            AS diversi
+        FROM transazioni_fortech tf
+        WHERE tf.prove_erogazione > 0
+           OR tf.clienti_fine_mese > 0
+           OR tf.diversi > 0
+    """).fetchall()
+
+    _SQL = '''
+        INSERT INTO riconciliazione_risultati
+            (codice_pv, data, categoria, valore_teorico, valore_reale, differenza, stato, tipo_match, note)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(codice_pv, data, categoria) DO UPDATE SET
+            valore_reale = excluded.valore_reale,
+            tipo_match   = excluded.tipo_match
+    '''
+    cats = [
+        ("prove_erogazione",  "prove_erogazione"),
+        ("clienti_fine_mese", "clienti_fine_mese"),
+        ("diversi",           "diversi"),
+    ]
+    params = []
+    for r in rows:
+        for col, cat in cats:
+            val = round(float(r[col] or 0), 2)
+            if val <= 0:
+                continue
+            params.append((int(r["codice_pv"]), r["data"], cat,
+                           0.0, val, 0.0, "QUADRATO", "informativo", ""))
+
+    if params:
+        conn.executemany(_SQL, params)
+    conn.close()
+    return jsonify(message=f"{len(params)} record informativo inseriti/aggiornati.")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
