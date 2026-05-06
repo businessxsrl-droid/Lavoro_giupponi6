@@ -321,10 +321,43 @@ def get_riconciliazioni():
     query += " ORDER BY r.data DESC, r.codice_pv, r.categoria"
 
     conn = get_connection()
+
+    # Sincronizza automaticamente i record informativo da transazioni_fortech
+    try:
+        _SQL_INFO = '''
+            INSERT INTO riconciliazione_risultati
+                (codice_pv, data, categoria, valore_teorico, valore_reale, differenza, stato, tipo_match, note)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(codice_pv, data, categoria) DO UPDATE SET
+                valore_reale = excluded.valore_reale,
+                tipo_match   = excluded.tipo_match
+        '''
+        f_all = conn.execute("""
+            SELECT codice_pv, data,
+                   COALESCE(prove_erogazione, 0)  AS prove_erogazione,
+                   COALESCE(clienti_fine_mese, 0) AS clienti_fine_mese,
+                   COALESCE(diversi, 0)            AS diversi
+            FROM transazioni_fortech
+            WHERE prove_erogazione > 0 OR clienti_fine_mese > 0 OR diversi > 0
+        """).fetchall()
+        info_params = []
+        for r in f_all:
+            for col, cat in [("prove_erogazione","prove_erogazione"),
+                             ("clienti_fine_mese","clienti_fine_mese"),
+                             ("diversi","diversi")]:
+                val = round(float(r[col] or 0), 2)
+                if val > 0:
+                    info_params.append((int(r["codice_pv"]), r["data"], cat,
+                                        0.0, val, 0.0, "QUADRATO", "informativo", ""))
+        if info_params:
+            conn.executemany(_SQL_INFO, info_params)
+    except Exception as e:
+        print(f"[migra_informativo auto] {e}")
+
     rows = conn.execute(query, params).fetchall()
     f_rows = conn.execute(query_f, params_f).fetchall()
     conn.close()
-    
+
     f_map = { (f["data"], f["codice_pv"]): dict(f) if hasattr(f, 'keys') else f for f in f_rows }
 
     # Etichette leggibili per le categorie
