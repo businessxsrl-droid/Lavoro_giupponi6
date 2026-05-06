@@ -630,28 +630,17 @@ async function loadRiconciliazioni() {
         `;
     }
 
-    // ── Sezione Deduzioni Fortech (Prove Erog. / Clienti F.M. / Diversi) ──
-    const infoMap = {};
-    for (const r of data) {
-        const key = `${r.data}|${r.impianto}`;
-        if (!infoMap[key] && (r.prove_erogazione > 0 || r.clienti_fine_mese > 0 || r.diversi > 0)) {
-            infoMap[key] = {
-                data: r.data,
-                impianto: r.impianto,
-                prove: r.prove_erogazione || 0,
-                clienti: r.clienti_fine_mese || 0,
-                diversi: r.diversi || 0,
-            };
-        }
-    }
-    const infoRows = Object.values(infoMap).sort((a, b) => b.data.localeCompare(a.data));
+    // ── Sezione Altro Fortech (Prove Erog. / Clienti F.M. / Diversi) ──
+    const infoRecords = data
+        .filter(r => CATEGORIE_INFORMATIVE.includes(r.categoria))
+        .sort((a, b) => b.data.localeCompare(a.data) || (a.impianto || '').localeCompare(b.impianto || ''));
 
-    if (infoRows.length > 0) {
+    if (infoRecords.length > 0) {
         html += `
         <div class="category-section" id="section-deduzioni">
             <h4 style="margin: 30px 0 10px 0; color: var(--text-primary); border-bottom: 2px solid var(--border-color); padding-bottom: 8px; display: flex; align-items: center; justify-content: space-between;">
                 <div style="display: flex; align-items: center; gap: 8px;">
-                    <span style="color:#e8a838;">●</span> Deduzioni Fortech
+                    <span style="color:#e8a838;">●</span> Altro Fortech
                 </div>
                 <button class="btn-toggle-section" onclick="toggleSection('wrapper-deduzioni', this)" title="Nascondi/Mostra">👁️</button>
             </h4>
@@ -662,19 +651,28 @@ async function loadRiconciliazioni() {
                             <tr>
                                 <th style="width: 120px;">Data</th>
                                 <th>Impianto</th>
-                                <th style="width: 140px; text-align: right;" title="Prove di erogazione">Prove Erogazione</th>
-                                <th style="width: 140px; text-align: right;" title="Clienti con fattura fine mese">Clienti F.M.</th>
-                                <th style="width: 120px; text-align: right;">Diversi</th>
+                                <th style="width: 180px;">Categoria</th>
+                                <th style="width: 130px; text-align: right;">Importo (€)</th>
+                                <th style="width: 200px;">Note</th>
+                                <th style="width: 70px; text-align: center;">Azioni</th>
                             </tr>
                         </thead>
                         <tbody>
-                            ${infoRows.map(r => `
-                            <tr>
+                            ${infoRecords.map(r => `
+                            <tr id="row-info-${r.id}">
                                 <td>${r.data || '—'}</td>
                                 <td style="font-weight: 500;">${r.impianto || '—'}</td>
-                                <td style="text-align: right; color: var(--text-secondary);">${r.prove > 0 ? renderMoney(r.prove) : '—'}</td>
-                                <td style="text-align: right; color: var(--text-secondary);">${r.clienti > 0 ? renderMoney(r.clienti) : '—'}</td>
-                                <td style="text-align: right; color: var(--text-secondary);">${r.diversi > 0 ? renderMoney(r.diversi) : '—'}</td>
+                                <td style="color: var(--text-secondary); font-size: 13px;">${r.categoria_label || r.categoria}</td>
+                                <td style="text-align: right;">${renderMoney(r.valore_reale)}</td>
+                                <td style="font-size: 11px; color: var(--text-secondary); line-height: 1.4;">
+                                    <span id="info-note-txt-${r.id}">${r.note || ''}</span>
+                                    <input type="text" id="info-note-inp-${r.id}" value="${r.note || ''}" style="display:none; width:100%">
+                                </td>
+                                <td style="text-align: center;">
+                                    <button class="btn-action btn-edit" id="info-btn-edit-${r.id}" onclick="toggleEditInfo(${r.id})" title="Modifica">✏️</button>
+                                    <button class="btn-action btn-save" id="info-btn-save-${r.id}" onclick="salvaInfoNote(${r.id}, ${r.valore_reale})" style="display:none" title="Salva">💾</button>
+                                    <button class="btn-action btn-cancel" id="info-btn-cancel-${r.id}" onclick="toggleEditInfo(${r.id})" style="display:none" title="Annulla">❌</button>
+                                </td>
                             </tr>
                             `).join('')}
                         </tbody>
@@ -698,6 +696,33 @@ function toggleSection(wrapperId, btn) {
     if (btn) {
         btn.textContent = isCollapsed ? '👁️‍🗨️' : '👁️';
         btn.title = isCollapsed ? 'Mostra sezione' : 'Nascondi sezione';
+    }
+}
+
+function toggleEditInfo(id) {
+    const inp = document.getElementById(`info-note-inp-${id}`);
+    const isEditing = inp.style.display === 'block';
+    document.getElementById(`info-note-txt-${id}`).style.display = isEditing ? 'inline' : 'none';
+    inp.style.display = isEditing ? 'none' : 'block';
+    document.getElementById(`info-btn-edit-${id}`).style.display = isEditing ? 'inline-block' : 'none';
+    document.getElementById(`info-btn-save-${id}`).style.display = isEditing ? 'none' : 'inline-block';
+    document.getElementById(`info-btn-cancel-${id}`).style.display = isEditing ? 'none' : 'inline-block';
+}
+
+async function salvaInfoNote(id, valoreReale) {
+    const newNote = document.getElementById(`info-note-inp-${id}`).value;
+    try {
+        const result = await apiFetch('/api/riconciliazioni/edit', {
+            method: 'POST',
+            body: JSON.stringify({ id: id, valore_reale: valoreReale, note: newNote })
+        });
+        if (result) {
+            document.getElementById(`info-note-txt-${id}`).textContent = newNote;
+            toggleEditInfo(id);
+            showToast("Nota aggiornata", "success");
+        }
+    } catch(e) {
+        showToast("Errore salvataggio nota", "error");
     }
 }
 
