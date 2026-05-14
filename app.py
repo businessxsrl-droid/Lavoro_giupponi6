@@ -908,17 +908,21 @@ def _build_ai_context(conn, data_from=None, data_to=None, codice_pv=None):
     ''').fetchall()
 
     # Assembla contesto
+    if not stats:
+        return None
     s = stats
     out = []
     out.append("=== STATISTICHE GLOBALI ===")
+    esposizione = s['esposizione_totale'] if s['esposizione_totale'] is not None else 0
     out.append(f"Totale riconciliazioni: {s['totale']} | Quadrate: {s['quadrate']} | "
                f"Anomalie gravi: {s['gravi']} | Anomalie lievi: {s['lievi']} | "
-               f"Non trovate: {s['non_trovate']} | Esposizione totale: €{s['esposizione_totale']}")
+               f"Non trovate: {s['non_trovate']} | Esposizione totale: €{esposizione}")
 
     out.append("\n=== ANOMALIE PER IMPIANTO (aggregate) ===")
     out.append("Impianto | N.Anomalie | Esposizione€ | MaxDiff€ | Categorie")
     for r in per_impianto:
-        out.append(f"{r['impianto'] or 'N/D'} | {r['n_anomalie']} | {r['esposizione']} | {r['max_diff']:.2f} | {r['categorie']}")
+        max_diff = float(r['max_diff']) if r['max_diff'] is not None else 0.0
+        out.append(f"{r['impianto'] or 'N/D'} | {r['n_anomalie']} | {r['esposizione']} | {max_diff:.2f} | {r['categorie']}")
 
     out.append("\n=== ANOMALIE PER CATEGORIA (aggregate) ===")
     out.append("Categoria | N.Anomalie | Esposizione€ | MediaDiff€")
@@ -1035,12 +1039,16 @@ def ai_report_stream():
         conn.close()
         return jsonify(error="Chiave API OpenRouter non configurata. Vai in Impostazioni."), 400
 
-    context = _build_ai_context(
-        conn,
-        data_from  = body.get("data_from"),
-        data_to    = body.get("data_to"),
-        codice_pv  = body.get("codice_pv"),
-    )
+    try:
+        context = _build_ai_context(
+            conn,
+            data_from  = body.get("data_from"),
+            data_to    = body.get("data_to"),
+            codice_pv  = body.get("codice_pv"),
+        )
+    except Exception as e:
+        conn.close()
+        return jsonify(error=f"Errore lettura dati DB: {str(e)}"), 500
     conn.close()
 
     if not context:
@@ -1082,7 +1090,12 @@ def ai_report_stream():
                     yield "data: [DONE]\n\n"
                     return
                 try:
-                    chunk   = json.loads(data_str)
+                    chunk = json.loads(data_str)
+                    if "error" in chunk:
+                        err_msg = chunk["error"].get("message", str(chunk["error"])) if isinstance(chunk["error"], dict) else str(chunk["error"])
+                        yield f"data: {json.dumps({'error': err_msg})}\n\n"
+                        yield "data: [DONE]\n\n"
+                        return
                     content = chunk["choices"][0]["delta"].get("content", "")
                     if content:
                         yield f"data: {json.dumps({'content': content})}\n\n"

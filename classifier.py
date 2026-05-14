@@ -20,6 +20,10 @@ GROUND_TRUTH: dict[str, list[str]] = {
         "Fatture Postpagate Totale", "Buoni Totale",
         # Formato senza servizio (Belfiore/Ghislandi/Marmirolo/Oltre il Colle/Rovetta/Famagosta)
         "BANCOMAT", "CARTACREDITO",
+        # Nuova colonna buoni elettronici virtuali
+        "API_BUONI_ELETTRONICI_VIRTUALI",
+        # Colonna Diversi nel formato con trattino
+        "-",
     ],
     "CONTANTI": [
         "Gruppo", "Azienda", "Banca", "Rbn", "Desc. RBN", "Nr Conto Corr.",
@@ -205,7 +209,7 @@ _FORTECH_MAPPING = {
                      "BANCOMAT", "CARTACREDITO"],
     "petrolifere":  ["DKV", "UTA", "CARTAMAXIMA"],
     # CARTAPETROLIFERA: nei senza servizio contiene sia buoni sia petrolifere (combinati)
-    "buoni":        ["BUONI", "CARTAPETROLIFERA"],
+    "buoni":        ["BUONI", "CARTAPETROLIFERA", "API_BUONI_ELETTRONICI_VIRTUALI"],
     "satispay":     ["PAGAMENTIINNOVATIVI"],
     "contanti":     ["CONTANTI"],
 }
@@ -251,8 +255,8 @@ def get_fortech_records(file_path: str) -> list[dict] | None:
                 fm_col = candidate
                 break
 
-        # Diversi: colonna 'DIVERSI' o 'Diversi' (da entrambi i formati)
-        diversi_col = next((c for c in df.columns if str(c).strip().upper() == "DIVERSI"), None)
+        # Diversi: colonna 'DIVERSI'/'Diversi' (formato standard) o '-' (formato Montodine)
+        diversi_col = next((c for c in df.columns if str(c).strip().upper() == "DIVERSI" or str(c).strip() == "-"), None)
 
         for col in prove_cols + ([fm_col] if fm_col else []) + ([diversi_col] if diversi_col else []):
             df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)

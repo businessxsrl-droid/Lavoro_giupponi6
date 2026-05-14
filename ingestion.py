@@ -185,6 +185,17 @@ def ingest_impianti(conn=None) -> int:
     except Exception:
         pass
 
+    # Inserisci Codogno se non presente
+    try:
+        conn.execute('''
+            INSERT INTO impianti (codice_pv, nome, comune, indirizzo, tipo_gestione)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(codice_pv) DO NOTHING
+        ''', (43721, 'Codogno', 'Codogno', 'Via Gorizia, 4', 'PRESIDIATO'))
+        count += 1
+    except Exception:
+        pass
+
     conn.commit()
     if close:
         conn.close()
@@ -242,7 +253,7 @@ def _trova_pv_da_alias(alias: str, impianti: list[dict]) -> int | None:
         "MALEO": 46273, "CREMONA": 48765, "MONTODINE": 43695,
         "MARMIROLO": 47832, "ROMANO": 43596, "SELVINO": 40297,
         "ROVETTA": 42840, "BERGAMO": 45874, "GHISLANDI": 45874,
-        "TALEGGIO": 49788, "FAMAGOSTA": 45818,
+        "TALEGGIO": 49788, "FAMAGOSTA": 45818, "CODOGNO": 43721,
         "PIOLTELLO": 43699,  # nota: ambiguo; prevale seggiano
     }
     for key, pv in HARDCODES.items():

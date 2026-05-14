@@ -320,6 +320,16 @@ def init_db():
     except Exception:
         pass
 
+    # Inserisci Codogno se non presente
+    try:
+        conn.execute('''
+            INSERT INTO impianti (codice_pv, nome, comune, indirizzo, tipo_gestione)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(codice_pv) DO NOTHING
+        ''', (43721, 'Codogno', 'Codogno', 'Via Gorizia, 4', 'PRESIDIATO'))
+    except Exception:
+        pass
+
     print("[DB] DB inizializzato.")
 
 def get_config(conn=None) -> dict:
