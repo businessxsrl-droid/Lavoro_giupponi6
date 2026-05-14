@@ -1399,43 +1399,58 @@ body {
 }
 
 .ai-report-body {
-    padding: 24px;
+    padding: 28px 32px;
     font-size: 14px;
-    line-height: 1.8;
+    line-height: 1.85;
     color: var(--text-primary);
 }
 
+.ai-report-body > *:first-child { margin-top: 0; }
+
 .ai-report-body h1 {
-    font-size: 20px;
-    margin: 24px 0 12px;
-    font-weight: 700;
+    font-size: 22px;
+    margin: 32px 0 14px;
+    font-weight: 800;
+    color: var(--text-primary);
+    padding-bottom: 8px;
+    border-bottom: 2px solid rgba(188, 140, 255, 0.3);
 }
 
 .ai-report-body h2 {
     font-size: 17px;
-    margin: 20px 0 10px;
+    margin: 28px 0 10px;
     font-weight: 700;
     color: var(--accent-blue);
+    padding-left: 12px;
+    border-left: 3px solid var(--accent-blue);
 }
 
 .ai-report-body h3 {
-    font-size: 15px;
-    margin: 16px 0 8px;
+    font-size: 14.5px;
+    margin: 18px 0 8px;
     font-weight: 600;
     color: var(--accent-cyan);
 }
 
 .ai-report-body p {
-    margin-bottom: 12px;
+    margin-bottom: 14px;
+    color: var(--text-secondary);
 }
 
 .ai-report-body ul,
 .ai-report-body ol {
-    margin: 8px 0 12px 20px;
+    margin: 6px 0 14px 22px;
+    padding: 0;
 }
 
 .ai-report-body li {
-    margin-bottom: 4px;
+    margin-bottom: 6px;
+    color: var(--text-secondary);
+    line-height: 1.7;
+}
+
+.ai-report-body li > strong {
+    color: var(--text-primary);
 }
 
 .ai-report-body strong {
@@ -1444,21 +1459,81 @@ body {
 }
 
 .ai-report-body em {
-    color: var(--text-secondary);
+    color: var(--text-muted);
+    font-style: italic;
 }
 
 .ai-report-body code {
-    background: var(--bg-tertiary);
-    padding: 2px 6px;
+    background: rgba(188, 140, 255, 0.1);
+    color: #bc8cff;
+    padding: 2px 7px;
     border-radius: 4px;
-    font-size: 12px;
-    font-family: 'Consolas', monospace;
+    font-size: 12.5px;
+    font-family: 'Consolas', 'Fira Code', monospace;
+    border: 1px solid rgba(188, 140, 255, 0.2);
+}
+
+.ai-report-body pre {
+    background: var(--bg-tertiary);
+    border-radius: 8px;
+    padding: 16px 20px;
+    overflow-x: auto;
+    margin: 12px 0 18px;
+    border: 1px solid var(--bg-tertiary);
+}
+
+.ai-report-body pre code {
+    background: none;
+    border: none;
+    padding: 0;
+    color: var(--text-primary);
+    font-size: 13px;
+}
+
+.ai-report-body blockquote {
+    margin: 12px 0 18px;
+    padding: 10px 16px;
+    border-left: 4px solid rgba(88, 166, 255, 0.5);
+    background: rgba(88, 166, 255, 0.05);
+    border-radius: 0 6px 6px 0;
+    color: var(--text-secondary);
+    font-style: italic;
+}
+
+.ai-report-body table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0 18px;
+    font-size: 13px;
+}
+
+.ai-report-body table th {
+    background: rgba(188, 140, 255, 0.1);
+    color: var(--text-primary);
+    font-weight: 600;
+    padding: 10px 14px;
+    text-align: left;
+    border-bottom: 2px solid rgba(188, 140, 255, 0.3);
+}
+
+.ai-report-body table td {
+    padding: 8px 14px;
+    border-bottom: 1px solid var(--bg-tertiary);
+    color: var(--text-secondary);
+}
+
+.ai-report-body table tr:last-child td {
+    border-bottom: none;
+}
+
+.ai-report-body table tr:hover td {
+    background: rgba(255,255,255,0.02);
 }
 
 .ai-report-body hr {
     border: none;
     border-top: 1px solid var(--bg-tertiary);
-    margin: 20px 0;
+    margin: 24px 0;
 }
 
 /* ═══════════════════════════════════════════════════════════════

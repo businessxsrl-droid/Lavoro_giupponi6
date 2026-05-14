@@ -1095,32 +1095,12 @@ function renderAndamento(container, data) {
 
 function simpleMarkdownToHtml(md) {
     if (!md) return '';
-    let html = md
-        // Escape HTML first
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        // Headers
-        .replace(/^### (.+)$/gm, '<h3>$1</h3>')
-        .replace(/^## (.+)$/gm, '<h2>$1</h2>')
-        .replace(/^# (.+)$/gm, '<h1>$1</h1>')
-        // Bold and italic
-        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-        .replace(/\*(.+?)\*/g, '<em>$1</em>')
-        // Code
-        .replace(/`(.+?)`/g, '<code>$1</code>')
-        // Horizontal rule
-        .replace(/^---$/gm, '<hr>')
-        // Unordered lists
-        .replace(/^- (.+)$/gm, '<li>$1</li>')
-        // Line breaks to paragraphs
-        .replace(/\n\n/g, '</p><p>')
-        .replace(/\n/g, '<br>');
-    // Wrap lists
-    html = html.replace(/(<li>.*?<\/li>)/gs, '<ul>$1</ul>');
-    // Clean up consecutive uls
-    html = html.replace(/<\/ul>\s*<ul>/g, '');
-    return '<p>' + html + '</p>';
+    if (typeof marked !== 'undefined') {
+        marked.setOptions({ breaks: true, gfm: true });
+        return marked.parse(md);
+    }
+    // Fallback minimale se marked non è caricato
+    return '<p>' + md.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>') + '</p>';
 }
 
 // ═══════════════════════════════════════════════════════════════
