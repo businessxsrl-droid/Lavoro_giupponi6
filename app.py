@@ -1067,7 +1067,7 @@ def ai_report_stream():
                 json={
                     "model":    model,
                     "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": 4000,
+                    "max_tokens": 2000,
                     "stream":   True,
                 },
                 headers={
