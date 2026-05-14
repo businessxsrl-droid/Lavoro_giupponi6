@@ -190,7 +190,7 @@ def ingest_impianti(conn=None) -> int:
         conn.execute('''
             INSERT INTO impianti (codice_pv, nome, comune, indirizzo, tipo_gestione)
             VALUES (?, ?, ?, ?, ?)
-            ON CONFLICT(codice_pv) DO NOTHING
+            ON CONFLICT(codice_pv) DO UPDATE SET nome = excluded.nome, comune = excluded.comune, indirizzo = excluded.indirizzo
         ''', (43721, 'CODOGNO - Via Gorizia, 4', 'Codogno', 'Via Gorizia, 4', 'PRESIDIATO'))
         count += 1
     except Exception:
