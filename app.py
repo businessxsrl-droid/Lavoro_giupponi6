@@ -1078,6 +1078,16 @@ def ai_report_stream():
                 stream=True,
                 timeout=60,
             )
+            if not resp.ok:
+                try:
+                    err_body = resp.json()
+                    err_obj  = err_body.get("error", {})
+                    err_msg  = err_obj.get("message", f"HTTP {resp.status_code}") if isinstance(err_obj, dict) else str(err_obj)
+                except Exception:
+                    err_msg = f"HTTP {resp.status_code}"
+                yield f"data: {json.dumps({'error': err_msg})}\n\n"
+                yield "data: [DONE]\n\n"
+                return
             for line in resp.iter_lines():
                 if not line:
                     continue

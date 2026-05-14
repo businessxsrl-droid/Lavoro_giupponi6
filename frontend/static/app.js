@@ -1358,15 +1358,15 @@ async function generateAIReport() {
             if (!line.startsWith('data: ')) continue;
             const payload = line.slice(6).trim();
             if (!payload || payload === '[DONE]') continue;
-            try {
-                const chunk = JSON.parse(payload);
-                if (chunk.error) throw new Error(chunk.error);
-                if (chunk.content) {
-                    rawText += chunk.content;
-                    reportBody.innerHTML = simpleMarkdownToHtml(rawText);
-                }
-            } catch(e) {
-                console.warn('SSE parse error:', e.message, '| payload:', payload.slice(0, 80));
+            let chunk;
+            try { chunk = JSON.parse(payload); } catch(e) { continue; }
+            if (chunk.error) {
+                const msg = typeof chunk.error === 'object' ? (chunk.error.message || JSON.stringify(chunk.error)) : String(chunk.error);
+                throw new Error(msg);
+            }
+            if (chunk.content) {
+                rawText += chunk.content;
+                reportBody.innerHTML = simpleMarkdownToHtml(rawText);
             }
         }
 
