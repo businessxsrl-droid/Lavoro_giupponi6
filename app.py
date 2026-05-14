@@ -831,12 +831,13 @@ def get_sicurezza():
 # ═══════════════════════════════════════════════════════════════════════════════
 
 OPENROUTER_MODELS = [
-    {"id": "openai/gpt-4o-mini",                     "label": "GPT-4o Mini (veloce, economico)"},
-    {"id": "openai/gpt-4o",                          "label": "GPT-4o (più potente)"},
-    {"id": "anthropic/claude-3-haiku",               "label": "Claude 3 Haiku (veloce)"},
-    {"id": "anthropic/claude-3.5-sonnet",            "label": "Claude 3.5 Sonnet (top Anthropic)"},
-    {"id": "google/gemini-flash-1.5",                "label": "Gemini Flash 1.5 (Google)"},
-    {"id": "meta-llama/llama-3.1-8b-instruct:free",  "label": "Llama 3.1 8B (gratuito)"},
+    {"id": "openai/gpt-4o-mini",                       "label": "GPT-4o Mini (veloce, economico)"},
+    {"id": "openai/gpt-4o",                            "label": "GPT-4o (più potente)"},
+    {"id": "anthropic/claude-3-haiku",                 "label": "Claude 3 Haiku (veloce)"},
+    {"id": "anthropic/claude-3.5-sonnet",              "label": "Claude 3.5 Sonnet (top Anthropic)"},
+    {"id": "google/gemini-2.0-flash-001",              "label": "Gemini 2.0 Flash (Google)"},
+    {"id": "google/gemini-2.5-flash-preview",          "label": "Gemini 2.5 Flash Preview (Google)"},
+    {"id": "meta-llama/llama-3.1-8b-instruct:free",    "label": "Llama 3.1 8B (gratuito)"},
 ]
 
 def _build_ai_context(conn, data_from=None, data_to=None, codice_pv=None):
