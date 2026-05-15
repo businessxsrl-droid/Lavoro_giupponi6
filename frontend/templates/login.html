@@ -48,31 +48,37 @@
         }
 
         .pw-wrapper {
-            position: relative;
+            display: flex;
+            align-items: center;
+            gap: 8px;
             margin-bottom: 16px;
         }
 
         .pw-wrapper input {
             margin-bottom: 0;
-            padding-right: 44px;
+            flex: 1;
         }
 
         .pw-toggle {
-            position: absolute;
-            right: 12px;
-            top: 50%;
-            transform: translateY(-50%);
-            background: none;
-            border: none;
+            flex-shrink: 0;
+            background: var(--bg-primary);
+            border: 1px solid var(--bg-tertiary);
+            border-radius: var(--radius-sm);
             cursor: pointer;
             color: var(--text-muted);
-            font-size: 16px;
-            padding: 4px;
-            line-height: 1;
-            width: auto;
+            padding: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 42px;
+            height: 42px;
+            transition: color 0.2s, border-color 0.2s;
         }
 
-        .pw-toggle:hover { color: var(--text-primary); }
+        .pw-toggle:hover {
+            color: var(--text-primary);
+            border-color: var(--accent-blue);
+        }
 
         .login-form button {
             width: 100%;
