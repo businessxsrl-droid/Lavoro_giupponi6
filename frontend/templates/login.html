@@ -48,18 +48,19 @@
         }
 
         .pw-wrapper { position: relative; margin-bottom: 16px; }
-        .pw-wrapper input { margin-bottom: 0; padding-right: 38px; box-sizing: border-box; }
+        .pw-wrapper input { width: 100%; margin-bottom: 0; padding-right: 38px; box-sizing: border-box; }
         .pw-wrapper input[type="password"]::-ms-reveal,
         .pw-wrapper input::-webkit-credentials-auto-fill-button { display: none; }
         .pw-toggle {
             position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
             background: none; border: none; cursor: pointer;
             color: var(--text-muted); padding: 0; line-height: 0; opacity: 0.6;
+            pointer-events: auto;
         }
         .pw-toggle:hover { opacity: 1; }
 
 
-        .login-form button {
+        .login-form button[type="submit"] {
             width: 100%;
             padding: 12px;
             background: var(--accent-blue);
@@ -72,7 +73,7 @@
             transition: all 0.3s ease;
         }
 
-        .login-form button:hover {
+        .login-form button[type="submit"]:hover {
             box-shadow: 0 4px 12px rgba(1, 28, 255, 0.2);
             transform: translateY(-2px);
         }
