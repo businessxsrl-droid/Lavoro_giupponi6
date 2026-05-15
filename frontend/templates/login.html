@@ -48,13 +48,15 @@
         }
 
         .pw-wrapper { position: relative; margin-bottom: 16px; }
-        .pw-wrapper input { margin-bottom: 0; padding-right: 40px; }
+        .pw-wrapper input { margin-bottom: 0; padding-right: 38px; box-sizing: border-box; }
+        .pw-wrapper input[type="password"]::-ms-reveal,
+        .pw-wrapper input::-webkit-credentials-auto-fill-button { display: none; }
         .pw-toggle {
             position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
             background: none; border: none; cursor: pointer;
-            color: var(--text-muted); padding: 0; line-height: 0;
+            color: var(--text-muted); padding: 0; line-height: 0; opacity: 0.6;
         }
-        .pw-toggle:hover { color: var(--text-primary); }
+        .pw-toggle:hover { opacity: 1; }
 
 
         .login-form button {
@@ -95,7 +97,10 @@
             <div class="pw-wrapper">
                 <input type="password" id="password" placeholder="Password" required autocomplete="current-password">
                 <button type="button" class="pw-toggle" onclick="togglePw()" title="Mostra/Nascondi password">
-                    <img id="pwIcon" src="/static/favicon.svg" width="18" height="18" alt="">
+                    <svg id="pwIcon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M3.5 12.5 C6 7.5 18 7.5 20.5 12.5"/>
+                        <circle cx="12" cy="13" r="2.5"/>
+                    </svg>
                 </button>
             </div>
             <button type="submit" id="login-btn">Accedi in Sicurezza</button>
@@ -108,8 +113,10 @@
             const input = document.getElementById('password');
             const icon  = document.getElementById('pwIcon');
             const show  = input.type === 'password';
-            input.type   = show ? 'text' : 'password';
-            icon.style.opacity = show ? '0.4' : '1';
+            input.type  = show ? 'text' : 'password';
+            icon.innerHTML = show
+                ? '<path d="M3.5 12.5 C6 7.5 18 7.5 20.5 12.5"/><circle cx="12" cy="13" r="2.5"/><line x1="4" y1="4" x2="20" y2="20"/>'
+                : '<path d="M3.5 12.5 C6 7.5 18 7.5 20.5 12.5"/><circle cx="12" cy="13" r="2.5"/>';
         }
 
 document.getElementById('login-form').addEventListener('submit', async (e) => {
