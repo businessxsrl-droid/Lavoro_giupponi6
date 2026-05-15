@@ -44,7 +44,35 @@
             font-family: 'Inter', sans-serif;
             background: var(--bg-primary);
             color: var(--text-primary);
+            box-sizing: border-box;
         }
+
+        .pw-wrapper {
+            position: relative;
+            margin-bottom: 16px;
+        }
+
+        .pw-wrapper input {
+            margin-bottom: 0;
+            padding-right: 44px;
+        }
+
+        .pw-toggle {
+            position: absolute;
+            right: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: none;
+            border: none;
+            cursor: pointer;
+            color: var(--text-muted);
+            font-size: 16px;
+            padding: 4px;
+            line-height: 1;
+            width: auto;
+        }
+
+        .pw-toggle:hover { color: var(--text-primary); }
 
         .login-form button {
             width: 100%;
@@ -81,13 +109,28 @@
         <div id="error-msg" class="error-msg"></div>
         <form class="login-form" id="login-form">
             <input type="text" id="username" placeholder="Nome Utente" required autocomplete="username">
-            <input type="password" id="password" placeholder="Password" required autocomplete="current-password">
+            <div class="pw-wrapper">
+                <input type="password" id="password" placeholder="Password" required autocomplete="current-password">
+                <button type="button" class="pw-toggle" id="togglePw" onclick="togglePw()" title="Mostra/Nascondi password">👁️</button>
+            </div>
             <button type="submit" id="login-btn">Accedi in Sicurezza</button>
         </form>
     </div>
 
     <script src="/static/_auth.js?v=2"></script>
     <script>
+        function togglePw() {
+            const input = document.getElementById('password');
+            const btn   = document.getElementById('togglePw');
+            if (input.type === 'password') {
+                input.type = 'text';
+                btn.textContent = '🙈';
+            } else {
+                input.type = 'password';
+                btn.textContent = '👁️';
+            }
+        }
+
         document.getElementById('login-form').addEventListener('submit', async (e) => {
             e.preventDefault();
             const errorMsg = document.getElementById('error-msg');
